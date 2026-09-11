@@ -1,239 +1,206 @@
+import CoreFoundation
 import Foundation
 import SeedKit
 
-// seed-mcp — servidor MCP (stdio, JSON-RPC 2.0 delimitado por linha) que expõe
-// as reuniões do Seed ao Claude Code. Somente leitura de ~/Documents/Seed.
-
+// MCP stdio: stdout contém somente JSON-RPC, uma mensagem por linha.
 let store = MeetingStore()
-
-// MARK: - Transporte
-
-func send(_ object: [String: Any]) {
-    guard JSONSerialization.isValidJSONObject(object),
-          let data = try? JSONSerialization.data(withJSONObject: object)
-    else { return }
-    FileHandle.standardOutput.write(data)
-    FileHandle.standardOutput.write(Data([0x0A]))
+let root = store.rootURL.resolvingSymlinksInPath().standardizedFileURL
+let supportedVersions = ["2025-03-26", "2025-06-18", "2025-11-25"]
+let idProperty: [String: Any] = ["type": "string", "description": "ID retornado por list_meetings ou search_meetings"]
+func number(_ minimum: Double, _ maximum: Double, _ description: String, integer: Bool = true) -> [String: Any] {
+    ["type": integer ? "integer" : "number", "minimum": minimum, "maximum": maximum, "description": description]
 }
-
-func reply(id: Any, result: [String: Any]) {
-    send(["jsonrpc": "2.0", "id": id, "result": result])
+func tool(_ name: String, _ description: String, _ properties: [String: Any], required: [String] = []) -> [String: Any] {
+    ["name": name, "description": description,
+     "inputSchema": ["type": "object", "properties": properties, "required": required, "additionalProperties": false],
+     "annotations": ["readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false]]
 }
-
-func replyError(id: Any, code: Int, message: String) {
-    send(["jsonrpc": "2.0", "id": id, "error": ["code": code, "message": message]])
-}
-
-func textResult(_ text: String) -> [String: Any] {
-    ["content": [["type": "text", "text": text]]]
-}
-
-// MARK: - Definição das ferramentas
-
-let toolDefinitions: [[String: Any]] = [
-    [
-        "name": "list_meetings",
-        "description": "Lista as reuniões gravadas no Seed (título, data, duração, pasta, tags, id). Use os filtros para restringir por período, pasta ou tag.",
-        "inputSchema": [
-            "type": "object",
-            "properties": [
-                "days": ["type": "number", "description": "Janela em dias (padrão 30)"],
-                "folder": ["type": "string", "description": "Filtrar por pasta (ex.: 1:1)"],
-                "tag": ["type": "string", "description": "Filtrar por tag (ex.: operações)"],
-                "limit": ["type": "number", "description": "Máximo de resultados (padrão 50)"],
-            ],
-        ] as [String: Any],
-    ],
-    [
-        "name": "get_meeting",
-        "description": "Detalhe de uma reunião: metadados, participantes, notas do usuário e o resumo completo. Use o id retornado por list_meetings ou search_meetings.",
-        "inputSchema": [
-            "type": "object",
-            "properties": ["id": ["type": "string", "description": "Id da reunião (nome da pasta, ex.: 20260707-103105)"]],
-            "required": ["id"],
-        ] as [String: Any],
-    ],
-    [
-        "name": "get_transcript",
-        "description": "Transcript completo de uma reunião (falas intercaladas com timestamps). Use para citações literais do que foi dito.",
-        "inputSchema": [
-            "type": "object",
-            "properties": ["id": ["type": "string", "description": "Id da reunião"]],
-            "required": ["id"],
-        ] as [String: Any],
-    ],
-    [
-        "name": "search_meetings",
-        "description": "Busca textual em títulos, tags, resumos e transcripts das reuniões. Retorna as reuniões com trechos onde o termo aparece.",
-        "inputSchema": [
-            "type": "object",
-            "properties": [
-                "query": ["type": "string", "description": "Termo de busca"],
-                "days": ["type": "number", "description": "Janela em dias (padrão 90)"],
-            ],
-            "required": ["query"],
-        ] as [String: Any],
-    ],
+let paging: [String: Any] = ["id": idProperty,
+    "offset": number(0, 100_000_000, "Posição em caracteres; padrão 0"),
+    "limit": number(1, 180_000, "Caracteres por página; padrão 20000")]
+let toolDefinitions = [
+    tool("list_meetings", "Lista reuniões por período, pasta e tag, com paginação. Não lê áudio.", [
+        "days": number(1, 36500, "Últimos dias; padrão 30"), "limit": number(1, 200, "Reuniões por página; padrão 50"),
+        "offset": number(0, 100_000_000, "Posição na lista; padrão 0"),
+        "folder": ["type": "string"], "tag": ["type": "string"]]),
+    tool("get_meeting", "Metadados, participantes, notas e resumo (até 20000 caracteres por texto). Para textos longos use get_summary/get_transcript.", ["id": idProperty], required: ["id"]),
+    tool("get_summary", "Lê o resumo salvo com paginação. Não gera resumo nem chama IA.", paging, required: ["id"]),
+    tool("get_transcript", "Lê transcrição salva com tempos. Continue com next_offset até null; pode ser parcial durante processamento.", paging, required: ["id"]),
+    tool("search_meetings", "Busca em título, tags, resumo e transcrição, com trechos e paginação.", [
+        "query": ["type": "string", "minLength": 1], "days": number(1, 36500, "Últimos dias; padrão 90"),
+        "offset": number(0, 100_000_000, "Posição nos resultados; padrão 0"), "limit": number(1, 200, "Resultados por página; padrão 50")], required: ["query"]),
+    tool("list_audio", "Lista trilhas mic/system, duração e disponibilidade. Não retorna bytes. Áudio pode ter expirado pela retenção.", ["id": idProperty], required: ["id"]),
+    tool("get_audio", "Retorna trecho de até 30s em conteúdo MCP audio/wav (PCM mono 16kHz). Requer cliente/modelo com suporte a áudio; não transcreve. Os tempos são relativos à trilha escolhida.", [
+        "id": idProperty, "track": ["type": "string", "enum": ["mic", "system"]],
+        "start_seconds": number(0, 1_000_000_000, "Início relativo à trilha; padrão 0", integer: false),
+        "duration_seconds": number(0.01, 30, "Duração desejada; padrão 15 segundos", integer: false)], required: ["id", "track"]),
 ]
 
-// MARK: - Implementação
-
-let dateFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.locale = Locale(identifier: "pt_BR")
-    f.dateFormat = "EEE, d MMM yyyy HH:mm"
-    return f
-}()
-
-func headerLine(_ meeting: Meeting) -> String {
-    var parts = [
-        "[\(meeting.id)]",
-        meeting.title,
-        dateFormatter.string(from: meeting.startedAt),
-        "\(max(1, Int(meeting.durationSeconds / 60))) min",
-        meeting.status.rawValue,
-    ]
-    if let folder = meeting.folder { parts.append("📁 \(folder)") }
-    if !meeting.tags.isEmpty { parts.append(meeting.tags.map { "#\($0)" }.joined(separator: " ")) }
-    return parts.joined(separator: " · ")
+func send(_ value: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return }
+    FileHandle.standardOutput.write(data + Data([10]))
 }
-
-func meetings(inDays days: Int) -> [Meeting] {
-    let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
-    return store.list().filter { $0.startedAt >= cutoff }
+func errorReply(_ id: Any, _ code: Int, _ message: String) {
+    send(["jsonrpc": "2.0", "id": id, "error": ["code": code, "message": message]])
 }
-
-func toolListMeetings(_ args: [String: Any]) -> String {
-    let days = (args["days"] as? NSNumber)?.intValue ?? 30
-    let limit = (args["limit"] as? NSNumber)?.intValue ?? 50
-    var result = meetings(inDays: days)
-    if let folder = args["folder"] as? String, !folder.isEmpty {
-        result = result.filter { $0.folder?.lowercased() == folder.lowercased() }
-    }
-    if let tag = args["tag"] as? String, !tag.isEmpty {
-        result = result.filter { $0.tags.contains(tag.lowercased()) }
-    }
-    guard !result.isEmpty else { return "Nenhuma reunião encontrada nos últimos \(days) dias com esses filtros." }
-    let lines = result.prefix(limit).map(headerLine)
-    return "Reuniões (últimos \(days) dias):\n\n" + lines.joined(separator: "\n")
+func structured(_ value: [String: Any]) -> [String: Any] {
+    let data = try! JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+    return ["structuredContent": value, "content": [["type": "text", "text": String(decoding: data, as: UTF8.self)]]]
 }
-
-func findMeeting(_ id: String) -> Meeting? {
-    store.list().first { $0.id == id }
+func safeFile(_ url: URL, in folder: URL) -> Bool {
+    let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+    return resolved.deletingLastPathComponent() == folder &&
+        (try? resolved.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
 }
-
-func toolGetMeeting(_ args: [String: Any]) -> String {
-    guard let id = args["id"] as? String, let meeting = findMeeting(id) else {
-        return "Reunião não encontrada. Use list_meetings para ver os ids."
-    }
-    var output = headerLine(meeting)
-    let speakers = Speakers.load(for: meeting)
-    if !speakers.isEmpty {
-        let names = (["Você"] + speakers.map(\.label)).joined(separator: ", ")
-        output += "\nParticipantes: \(names)"
-    }
-    if let notes = store.readNotes(meeting), !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        output += "\n\n== NOTAS DO USUÁRIO ==\n\(notes)"
-    }
-    if let summary = store.readSummary(meeting) {
-        output += "\n\n== RESUMO ==\n\(summary)"
-    } else {
-        output += "\n\n(resumo ainda não disponível — status \(meeting.status.rawValue))"
-    }
-    return output
+func meetings() -> [Meeting] {
+    let entries = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+    return entries.compactMap { url -> Meeting? in
+        let folder = url.resolvingSymlinksInPath().standardizedFileURL
+        guard folder == url.standardizedFileURL, folder.deletingLastPathComponent() == root,
+              safeFile(folder.appendingPathComponent("meta.json"), in: folder) else { return nil }
+        return store.read(folderURL: folder)
+    }.sorted { $0.startedAt == $1.startedAt ? $0.id < $1.id : $0.startedAt > $1.startedAt }
 }
-
-func toolGetTranscript(_ args: [String: Any]) -> String {
-    guard let id = args["id"] as? String, let meeting = findMeeting(id) else {
-        return "Reunião não encontrada. Use list_meetings para ver os ids."
+func meeting(_ args: [String: Any]) throws -> Meeting {
+    guard let id = args["id"] as? String, !id.isEmpty, !id.contains("/"), id != ".", id != "..",
+          let found = meetings().first(where: { $0.id == id }) else {
+        throw SeedError("Reunião não encontrada. Use list_meetings para obter IDs válidos.")
     }
-    guard let transcript = store.readTranscript(meeting) else {
-        return "Transcript ainda não disponível (status \(meeting.status.rawValue))."
-    }
-    let limit = 180_000
-    if transcript.count > limit {
-        return String(transcript.prefix(limit)) + "\n\n[transcript truncado em \(limit) caracteres]"
-    }
-    return transcript
+    return found
 }
-
-func toolSearchMeetings(_ args: [String: Any]) -> String {
-    guard let query = (args["query"] as? String)?.lowercased(), !query.isEmpty else {
-        return "Informe um termo de busca."
-    }
-    let days = (args["days"] as? NSNumber)?.intValue ?? 90
-    var hits: [String] = []
-    for meeting in meetings(inDays: days) {
-        var snippets: [String] = []
-        if meeting.title.lowercased().contains(query) { snippets.append("(título)") }
-        if meeting.tags.contains(where: { $0.contains(query) }) { snippets.append("(tag)") }
-        for (label, content) in [("resumo", store.readSummary(meeting)), ("transcript", store.readTranscript(meeting))] {
-            guard let content, !content.isEmpty else { continue }
-            let lower = content.lowercased()
-            guard let range = lower.range(of: query) else { continue }
-            let start = content.index(range.lowerBound, offsetBy: -120, limitedBy: content.startIndex) ?? content.startIndex
-            let end = content.index(range.upperBound, offsetBy: 120, limitedBy: content.endIndex) ?? content.endIndex
-            let snippet = content[start..<end].replacingOccurrences(of: "\n", with: " ")
-            snippets.append("(\(label)) …\(snippet)…")
-        }
-        if !snippets.isEmpty {
-            hits.append(headerLine(meeting) + "\n  " + snippets.joined(separator: "\n  "))
+func read(_ url: URL, _ meeting: Meeting) -> String? {
+    guard safeFile(url, in: meeting.folderURL) else { return nil }
+    return try? String(contentsOf: url, encoding: .utf8)
+}
+func meta(_ meeting: Meeting) -> [String: Any] {
+    ["id": meeting.id, "title": meeting.title, "started_at": ISO8601DateFormatter().string(from: meeting.startedAt),
+     "duration_seconds": meeting.durationSeconds, "status": meeting.status.rawValue,
+     "folder": meeting.folder as Any? ?? NSNull(), "tags": meeting.tags]
+}
+func value(_ args: [String: Any], _ key: String, _ fallback: Int) -> Int { (args[key] as? NSNumber)?.intValue ?? fallback }
+func page(_ text: String, _ args: [String: Any], _ id: String) -> [String: Any] {
+    let offset = value(args, "offset", 0), limit = value(args, "limit", 20_000)
+    let start = text.index(text.startIndex, offsetBy: min(offset, text.count))
+    let end = text.index(start, offsetBy: min(limit, text.distance(from: start, to: text.endIndex)))
+    let next = min(offset, text.count) + text.distance(from: start, to: end)
+    return ["id": id, "text": String(text[start..<end]), "offset": offset,
+            "total_characters": text.count, "next_offset": next < text.count ? next as Any : NSNull()]
+}
+func validate(_ args: [String: Any], definition: [String: Any]) -> Bool {
+    let schema = definition["inputSchema"] as! [String: Any]
+    let properties = schema["properties"] as! [String: [String: Any]]
+    for key in schema["required"] as! [String] where args[key] == nil { return false }
+    for (key, input) in args {
+        guard let spec = properties[key], let type = spec["type"] as? String else { return false }
+        if type == "string" {
+            guard let string = input as? String else { return false }
+            if let options = spec["enum"] as? [String], !options.contains(string) { return false }
+            if let min = spec["minLength"] as? Int, string.trimmingCharacters(in: .whitespacesAndNewlines).count < min { return false }
+        } else {
+            guard let n = input as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue.isFinite else { return false }
+            if type == "integer" && n.doubleValue.rounded() != n.doubleValue { return false }
+            if let min = spec["minimum"] as? Double, n.doubleValue < min { return false }
+            if let max = spec["maximum"] as? Double, n.doubleValue > max { return false }
         }
     }
-    guard !hits.isEmpty else { return "Nada encontrado para \"\(query)\" nos últimos \(days) dias." }
-    return "Resultados para \"\(query)\":\n\n" + hits.joined(separator: "\n\n")
+    return true
 }
-
-// MARK: - Loop principal
+func call(_ name: String, _ args: [String: Any]) throws -> [String: Any] {
+    if name == "list_meetings" || name == "search_meetings" {
+        let days = value(args, "days", name == "search_meetings" ? 90 : 30)
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86400)
+        var results: [[String: Any]] = []
+        for item in meetings() where item.startedAt >= cutoff {
+            if let folder = args["folder"] as? String, item.folder?.lowercased() != folder.lowercased() { continue }
+            if let tag = args["tag"] as? String, !item.tags.contains(where: { $0.lowercased() == tag.lowercased() }) { continue }
+            var entry = meta(item)
+            if let query = args["query"] as? String {
+                let texts = [item.title, item.tags.joined(separator: " "), read(item.summaryURL, item) ?? "", read(item.transcriptURL, item) ?? ""]
+                let snippets = texts.compactMap { text -> String? in
+                    guard let range = text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) else { return nil }
+                    let start = text.index(range.lowerBound, offsetBy: -80, limitedBy: text.startIndex) ?? text.startIndex
+                    let end = text.index(range.upperBound, offsetBy: 120, limitedBy: text.endIndex) ?? text.endIndex
+                    return String(text[start..<end])
+                }
+                if snippets.isEmpty { continue }
+                entry["snippets"] = snippets
+            }
+            results.append(entry)
+        }
+        let offset = value(args, "offset", 0), limit = value(args, "limit", 50)
+        let items = Array(results.dropFirst(offset).prefix(limit))
+        let next = offset + items.count
+        return structured(["meetings": items, "total": results.count, "next_offset": next < results.count ? next as Any : NSNull()])
+    }
+    let item = try meeting(args)
+    switch name {
+    case "get_meeting":
+        var result = meta(item)
+        let speakerURL = item.folderURL.appendingPathComponent("speakers.json")
+        result["participants"] = safeFile(speakerURL, in: item.folderURL) ? Speakers.load(for: item).map(\.label) : []
+        result["notes"] = read(item.notesURL, item).map { String($0.prefix(20_000)) } as Any? ?? NSNull()
+        let summary = read(item.summaryURL, item)
+        result["summary"] = summary.map { String($0.prefix(20_000)) } as Any? ?? NSNull()
+        result["summary_truncated"] = (summary?.count ?? 0) > 20_000
+        return structured(result)
+    case "get_summary", "get_transcript":
+        guard let text = read(name == "get_summary" ? item.summaryURL : item.transcriptURL, item) else {
+            throw SeedError("Texto indisponível ou inacessível; estado da reunião: \(item.status.rawValue).")
+        }
+        return structured(page(text, args, item.id))
+    case "list_audio":
+        var tracks: [[String: Any]] = []
+        for (track, url) in [("mic", item.micURL), ("system", item.systemURL)] {
+            let available = safeFile(url, in: item.folderURL)
+            let duration = available ? try? MeetingAudio.duration(of: url) : nil
+            tracks.append(["track": track, "available": available && duration != nil,
+                           "duration_seconds": duration as Any? ?? NSNull(), "format": url.pathExtension])
+        }
+        return structured(["id": item.id, "tracks": tracks, "max_clip_seconds": 30])
+    case "get_audio":
+        let track = args["track"] as! String
+        let url = track == "mic" ? item.micURL : item.systemURL
+        guard safeFile(url, in: item.folderURL) else {
+            throw SeedError("Áudio indisponível: a trilha pode ter expirado, sido removida ou ainda não existir.")
+        }
+        let start = (args["start_seconds"] as? NSNumber)?.doubleValue ?? 0
+        let duration = (args["duration_seconds"] as? NSNumber)?.doubleValue ?? 15
+        let clip = try MeetingAudio.clip(url: url, start: start, duration: duration)
+        return ["content": [
+            ["type": "text", "text": "\(item.id), trilha \(track), início \(start)s, duração \(clip.durationSeconds)s. WAV mono 16 kHz."],
+            ["type": "audio", "mimeType": "audio/wav", "data": clip.wav.base64EncodedString()]]]
+    default: throw SeedError("Ferramenta desconhecida.")
+    }
+}
 
 while let line = readLine(strippingNewline: true) {
-    guard !line.isEmpty,
-          let data = line.data(using: .utf8),
-          let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let method = message["method"] as? String
-    else { continue }
-
-    let id = message["id"]
-
+    if line.isEmpty { continue }
+    guard let data = line.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) else {
+        errorReply(NSNull(), -32700, "JSON inválido"); continue
+    }
+    guard let message = object as? [String: Any], message["jsonrpc"] as? String == "2.0", let method = message["method"] as? String else {
+        errorReply(NSNull(), -32600, "Request inválido"); continue
+    }
+    guard let id = message["id"] else { continue } // Notificações não recebem resposta.
+    let params = message["params"] as? [String: Any] ?? [:]
+    var result: [String: Any]
     switch method {
     case "initialize":
-        let params = message["params"] as? [String: Any]
-        let version = (params?["protocolVersion"] as? String) ?? "2024-11-05"
-        if let id {
-            reply(id: id, result: [
-                "protocolVersion": version,
-                "capabilities": ["tools": [:] as [String: Any]],
-                "serverInfo": ["name": "seed", "version": "1.0.0"],
-            ])
-        }
-    case "ping":
-        if let id { reply(id: id, result: [:]) }
-    case "tools/list":
-        if let id { reply(id: id, result: ["tools": toolDefinitions]) }
+        let requested = params["protocolVersion"] as? String ?? ""
+        result = ["protocolVersion": supportedVersions.contains(requested) ? requested : supportedVersions.last!,
+                  "capabilities": ["tools": [:] as [String: Any]], "serverInfo": ["name": "seed", "version": "0.2.1"]]
+    case "ping": result = [:]
+    case "tools/list": result = ["tools": toolDefinitions]
     case "tools/call":
-        guard let id else { continue }
-        guard let params = message["params"] as? [String: Any],
-              let name = params["name"] as? String
-        else {
-            replyError(id: id, code: -32602, message: "parâmetros inválidos")
-            continue
+        guard let name = params["name"] as? String, let definition = toolDefinitions.first(where: { $0["name"] as? String == name }),
+              params["arguments"] == nil || params["arguments"] is [String: Any],
+              validate(params["arguments"] as? [String: Any] ?? [:], definition: definition) else {
+            errorReply(id, -32602, "Ferramenta ou argumentos inválidos; consulte tools/list."); continue
         }
-        let args = params["arguments"] as? [String: Any] ?? [:]
-        let output: String
-        switch name {
-        case "list_meetings": output = toolListMeetings(args)
-        case "get_meeting": output = toolGetMeeting(args)
-        case "get_transcript": output = toolGetTranscript(args)
-        case "search_meetings": output = toolSearchMeetings(args)
-        default:
-            replyError(id: id, code: -32602, message: "ferramenta desconhecida: \(name)")
-            continue
-        }
-        reply(id: id, result: textResult(output))
+        do { result = try call(name, params["arguments"] as? [String: Any] ?? [:]) }
+        catch { result = ["isError": true, "content": [["type": "text", "text": String(describing: error)]]] }
     default:
-        // notificações (notifications/*) são ignoradas; requests desconhecidos recebem erro
-        if let id {
-            replyError(id: id, code: -32601, message: "método não suportado: \(method)")
-        }
+        errorReply(id, -32601, "Método não suportado: \(method)"); continue
     }
+    send(["jsonrpc": "2.0", "id": id, "result": result])
 }

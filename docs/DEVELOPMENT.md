@@ -46,7 +46,7 @@ isso não valida a veracidade do conteúdo.
 
 1. Execute os testes locais e, quando alterar integrações, os testes reais.
 2. Revise documentos, exemplos e capturas para não publicar dados pessoais.
-3. Compile `make app` e confira a assinatura com `codesign --verify --deep --strict dist/Seed.app`.
+3. Compile `make app` (inclui `seed-mcp`) e confira a assinatura com `codesign --verify --deep --strict dist/Seed.app`.
 4. Empacote somente o bundle. Nunca copie `~/Documents/Seed`, caches dos CLIs ou `.build` para a release.
 5. Em builds comunitários, remova símbolos de debug (`strip -S`) antes de assinar a cópia de distribuição ad-hoc. Publique o zip e SHA-256 numa release.
 6. Execute `python3 scripts/audit-distribution.py` no diretório público antes de enviar.
@@ -62,3 +62,9 @@ Use nomes e transcrições fictícios. Não envie logs completos de CLI, tokens,
 prints de reuniões reais ou arquivos da pasta de dados. Novas preferências
 precisam de defaults retrocompatíveis. Novos motores devem funcionar sem
 interação no Terminal e retornar só o texto final para resumo e chat.
+
+## MCP
+
+`make mcp` compila somente o servidor. `make test-mcp` valida as sete ferramentas
+por stdio, incluindo paginação e áudio WAV/CAF fictício. O guia [MCP](MCP.md)
+descreve configuração de clientes, formatos de resposta e teste opcional com agente.

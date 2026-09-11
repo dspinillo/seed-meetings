@@ -29,7 +29,7 @@ Grave reuniões no Mac, acompanhe a transcrição, anote ideias e converse com o
 | Parada automática | Pode encerrar ao sair da chamada ou após silêncio prolongado. Configurável. |
 | Organização | Busca em títulos e conteúdo, pastas, tags, renomeação e acesso à pasta de arquivos de cada reunião. |
 | Follow-ups e tarefas | Gera rascunhos para compartilhar e consolida suas pendências recentes. Não envia mensagens automaticamente. |
-| Integração MCP | Um servidor opcional permite que clientes MCP consultem suas reuniões, transcrições e resumos. |
+| Integração MCP | Servidor incluído no app (0.2.1+): agentes consultam resumos, transcrições paginadas e trechos de áudio via MCP. |
 | Controles do Mac | App na barra de menus, indicador flutuante, abertura no login e seleção de microfone. |
 | Retenção | Expiração configurável do áudio bruto; transcrições, resumos e notas continuam armazenados. |
 
@@ -126,7 +126,7 @@ make cli       # CLI de diagnóstico
 make test      # testes locais, sem chamadas pagas aos motores
 ```
 
-Veja [Desenvolvimento](docs/DEVELOPMENT.md) para arquitetura, testes reais dos motores, publicação e uso de um diretório de dados isolado. Veja [MCP](docs/MCP.md) para conectar clientes externos. A integração MCP é opcional e dá ao cliente acesso ao conteúdo local das reuniões.
+Veja [Desenvolvimento](docs/DEVELOPMENT.md) para arquitetura, testes reais dos motores, publicação e uso de um diretório de dados isolado. Veja [MCP](docs/MCP.md) para conectar clientes externos. A integração MCP é opcional e dá ao cliente acesso aos textos e aos áudios locais. O servidor já acompanha o app em `Seed.app/Contents/MacOS/seed-mcp`. Veja os comandos de conexão com Codex/Claude Code e exemplos de consultas no [guia MCP](docs/MCP.md).
 
 ## Limitações
 

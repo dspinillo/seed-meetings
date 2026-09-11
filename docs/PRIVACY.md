@@ -67,6 +67,6 @@ de vozes é compartilhada entre reuniões e não é apagada com uma reunião.
 
 O Seed não oferece upload, telemetria própria ou sincronização própria. Copiar
 um resumo e conectar o servidor MCP são ações de compartilhamento sob controle
-do usuário. Um cliente MCP pode encaminhar os textos a serviços externos.
+do usuário. Um cliente MCP pode solicitar textos e trechos de áudio e encaminhá-los a serviços externos. Essa saída de áudio pelo cliente é opcional e diferente da transcrição local do Seed. Veja [MCP](MCP.md).
 
 Não envie logs, dumps ou capturas com informações reais em issues públicas.

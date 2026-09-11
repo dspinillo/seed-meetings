@@ -14,3 +14,17 @@ manual de cada tela, a uma nova gravação de chamada completa, nem garantem
 acesso aos modelos em outras contas. As capturas do README foram fornecidas para
 documentação e antecedem o novo seletor Codex. A qualidade factual de resultados
 de IA continua exigindo revisão humana.
+
+## MCP na versão 0.2.1
+
+Validado em 11/09/2026 com o executável real, por JSON-RPC/stdio:
+
+- Inicialização/negociação de protocolo, notificações, ping e descoberta das sete ferramentas.
+- Listagem, busca sem distinção de acentos/maiúsculas, resumo, notas e transcrição completa reconstruída por páginas.
+- Trilhas WAV estéreo 48 kHz e CAF convertidas para áudio MCP WAV mono 16 kHz, decodificado e verificado por um cliente Python.
+- Recorte no meio e no fim da trilha, áudio ausente, início além do fim e duração máxima.
+- IDs inválidos, links simbólicos para fora da pasta, argumentos negativos/fracionários/booleanos e mensagens JSON inválidas.
+- Agente Codex com MCP configurado apenas para o teste: leu um código aleatório presente no resumo, um nome na transcrição e a duração da trilha de uma reunião fictícia.
+
+O teste do agente valida consumo de texto/metadados via MCP. Não valida audição
+por um modelo: o áudio foi verificado no cliente de protocolo com decodificação WAV.

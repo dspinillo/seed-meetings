@@ -11,13 +11,16 @@ APP := dist/Seed.app
 # do TCC entre builds; sem ela, cai no ad-hoc (re-pede permissões)
 SIGN_ID := $(shell security find-identity -v -p codesigning 2>/dev/null | grep -q "Seed Dev" && echo Seed Dev || echo -)
 
-.PHONY: app run cli clean
+.PHONY: app run cli mcp test test-mcp clean
 
 app:
 	$(SPM_ENV) swift build -c release --product SeedApp
+	$(SPM_ENV) swift build -c release --product seed-mcp
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
 	cp .build/release/SeedApp $(APP)/Contents/MacOS/Seed
+	cp .build/release/seed-mcp $(APP)/Contents/MacOS/seed-mcp
+	codesign --force --sign "$(SIGN_ID)" $(APP)/Contents/MacOS/seed-mcp
 	cp packaging/Info.plist $(APP)/Contents/Info.plist
 	cp packaging/Seed.icns $(APP)/Contents/Resources/Seed.icns
 	codesign --force --sign "$(SIGN_ID)" $(APP)
@@ -31,6 +34,12 @@ run: app
 
 cli:
 	$(SPM_ENV) swift build -c release --product seed-spike
+
+mcp:
+	$(SPM_ENV) swift build -c release --product seed-mcp
+
+test-mcp: mcp
+	python3 scripts/test-mcp.py
 
 test:
 	$(SPM_ENV) swift test
