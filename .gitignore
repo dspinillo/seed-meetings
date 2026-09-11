@@ -1,0 +1,40 @@
+# Build local
+.build/
+dist/
+seed-spike
+.toolchain-fix/
+
+# Dados, gravações e recuperação
+Documents/
+gravacoes/
+seed-data/
+*.wav
+*.caf
+*.mp3
+*.m4a
+transcript.md
+resumo.md
+notas.md
+meta.json
+segments.json
+speakers.json
+chat.json
+followup.md
+.config.json
+.glossario.json
+.voiceprints.json
+*.bak
+
+# Credenciais e configuração da máquina
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.auth.json
+auth.json
+.claude/
+.codex/
+.agents/
+.DS_Store

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>ai.seed.spike</string>
+    <key>CFBundleName</key>
+    <string>seed-spike</string>
+    <key>CFBundleVersion</key>
+    <string>0.1</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>O Seed grava sua voz durante reuniões para transcrever localmente.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>O Seed grava o áudio da reunião (outros participantes) para transcrever localmente.</string>
+</dict>
+</plist>

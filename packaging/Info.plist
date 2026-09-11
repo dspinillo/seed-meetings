@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>ai.seed.app</string>
+    <key>CFBundleName</key>
+    <string>Seed</string>
+    <key>CFBundleDisplayName</key>
+    <string>Seed</string>
+    <key>CFBundleExecutable</key>
+    <string>Seed</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>Seed</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.2.0</string>
+    <key>CFBundleVersion</key>
+    <string>2</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.4</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>O Seed grava sua voz durante reuniões para transcrever localmente.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>O Seed grava o áudio da reunião (outros participantes) para transcrever localmente.</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Seed Meetings contributors</string>
+</dict>
+</plist>
