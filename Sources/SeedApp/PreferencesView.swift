@@ -229,6 +229,44 @@ struct PreferencesView: View {
                     .fixedSize()
                 }
             }
+            if settings.provider == .claude {
+                row("Modelo rápido do Claude", "Usado no chat ao vivo e na classificação, onde a resposta precisa sair em segundos") {
+                    Picker("", selection: $settings.fastClaudeModel) {
+                        Text("Haiku").tag("haiku")
+                        Text("Sonnet").tag("sonnet")
+                        Text("Padrão da conta").tag("default")
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .onChange(of: settings.fastClaudeModel) { _, _ in settings.save() }
+                }
+            }
+            row("Classificar reuniões", "Temperatura, flags, ferramentas e temas — uma chamada pequena à IA a cada resumo gerado") {
+                Toggle("", isOn: $settings.classifyMeetings)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: settings.classifyMeetings) { _, _ in settings.save() }
+            }
+            row("Busca semântica (Ollama)", "Índice local dos transcripts para achar reuniões pelo sentido, sugerir tópicos e dar contexto ao chat do tópico. Exige o Ollama rodando") {
+                Toggle("", isOn: $settings.semanticSearch)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: settings.semanticSearch) { _, _ in
+                        settings.save()
+                        state.scheduleIndexing()
+                    }
+            }
+            if settings.semanticSearch {
+                row("Modelo de embedding", "Baixe antes com: ollama pull \(settings.embeddingModel). Trocar o modelo reindexa tudo") {
+                    TextField("modelo", text: $settings.embeddingModel)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 200)
+                        .onSubmit {
+                            settings.save()
+                            state.scheduleIndexing()
+                        }
+                }
+            }
             row("Refino em 2º plano re-resume com", "O resumo rápido sai na hora; o refinado pode usar outra IA (ou ser pulado) para poupar seu limite") {
                 Picker("", selection: $settings.refineProvider) {
                     Text("Mesma IA").tag("same")

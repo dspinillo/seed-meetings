@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 import SeedKit
 import SwiftUI
@@ -10,7 +11,14 @@ final class AppState: ObservableObject {
     let store = MeetingStore()
 
     @Published var meetings: [Meeting] = []
-    @Published var session: RecordingSession?
+    @Published var session: RecordingSession? {
+        didSet { recordingFlag.set(session != nil) }
+    }
+    @Published var topics: [Topic] = []
+    /// Resposta do chat chegando aos poucos (streaming), por reunião/tópico.
+    @Published var chatPartial: [String: String] = [:]
+    /// Reuniões achadas pela busca semântica para o texto digitado.
+    @Published var semanticHits: [String: SemanticIndex.Hit] = [:]
     @Published var processingStage: [String: String] = [:]
     @Published var selectedMeetingID: String?
     @Published var lastError: String?
@@ -35,6 +43,11 @@ final class AppState: ObservableObject {
     private var liveOffsetMic = 0        // amostras já consumidas (16 kHz)
     private var liveOffsetSystem = 0
     private var liveUtterances: [Utterance] = []
+
+    /// Lido fora da main thread pela indexação: nunca indexar gravando.
+    private let recordingFlag = RecordingFlag()
+    private var indexing = false
+    private var searchSubscription: AnyCancellable?
 
     private var searchCache: [String: String] = [:]
     /// Reuniões com indexação em andamento; invalidar remove daqui para o
@@ -61,6 +74,7 @@ final class AppState: ObservableObject {
                 || meeting.tags.joined(separator: " ").lowercased().contains(query)
                 || (meeting.folder ?? "").lowercased().contains(query)
                 || (searchCache[meeting.id]?.contains(query) ?? false)
+                || semanticHits[meeting.id] != nil
         }
     }
 
@@ -83,6 +97,16 @@ final class AppState: ObservableObject {
         rotateDetectorLog()
         installTerminationLogging()
         refresh()
+        topics = Topics.load()
+        // busca híbrida: a parte semântica roda depois de uma pausa na digitação
+        searchSubscription = $searchText
+            .debounce(for: .milliseconds(450), scheduler: RunLoop.main)
+            .removeDuplicates()
+            .sink { [weak self] text in self?.runSemanticSearch(text) }
+        Task { @MainActor in
+            await self.waitUntilIdle()
+            self.scheduleIndexing()
+        }
         let store = self.store
         let retentionDays = SeedSettings.load().retentionDays
         Task.detached(priority: .background) {
@@ -152,6 +176,7 @@ final class AppState: ObservableObject {
                     AppState.shared.searchCacheInvalidate(meeting.id)
                     AppState.shared.refresh()
                     AppState.shared.speakersTick += 1
+                    AppState.shared.scheduleIndexing()
                 }
             }
         }
@@ -310,6 +335,7 @@ final class AppState: ObservableObject {
                     AppState.shared.searchCacheInvalidate(meeting.id)
                     AppState.shared.refresh()
                     AppState.shared.speakersTick += 1
+                    AppState.shared.scheduleIndexing()
                 }
             }
         }
@@ -548,6 +574,7 @@ final class AppState: ObservableObject {
                 AppState.shared.processingStage[meeting.id] = nil
                 AppState.shared.refresh()
                 AppState.shared.speakersTick += 1
+                AppState.shared.scheduleIndexing()
                 if updated.status == .ready {
                     Notifier.shared.notify(title: "Resumo pronto 🌱", body: updated.title)
                 }
@@ -632,12 +659,14 @@ final class AppState: ObservableObject {
             do {
                 try MeetingChat.askLive(
                     trimmed, meeting: meeting,
-                    liveTranscript: transcript, notes: notes, nowStamp: nowStamp
+                    liveTranscript: transcript, notes: notes, nowStamp: nowStamp,
+                    onPartial: AppState.partialSink(meeting.id)
                 )
             } catch {
                 failure = "\(error)"
             }
             await MainActor.run {
+                AppState.shared.chatPartial[meeting.id] = nil
                 AppState.shared.chatBusy.remove(meeting.id)
                 AppState.shared.chatTick += 1
                 if let failure { AppState.shared.lastError = failure }
@@ -654,11 +683,13 @@ final class AppState: ObservableObject {
         Task.detached(priority: .userInitiated) {
             var failure: String?
             do {
-                try MeetingChat.ask(trimmed, meeting: meeting, store: store)
+                try MeetingChat.ask(trimmed, meeting: meeting, store: store,
+                                    onPartial: AppState.partialSink(meeting.id))
             } catch {
                 failure = "\(error)"
             }
             await MainActor.run {
+                AppState.shared.chatPartial[meeting.id] = nil
                 AppState.shared.chatBusy.remove(meeting.id)
                 AppState.shared.chatTick += 1
                 if let failure { AppState.shared.lastError = failure }
@@ -738,5 +769,189 @@ final class AppState: ObservableObject {
         store.delete(meeting)
         if selectedMeetingID == meeting.id { selectedMeetingID = nil }
         refresh()
+    }
+
+    /// Entrega o texto parcial do streaming à UI. Só publica enquanto a
+    /// pergunta está em andamento, para um pedaço atrasado não ressuscitar a
+    /// bolha depois que a resposta final já entrou no histórico.
+    nonisolated static func partialSink(_ key: String) -> @Sendable (String) -> Void {
+        { text in
+            Task { @MainActor in
+                if AppState.shared.chatBusy.contains(key) { AppState.shared.chatPartial[key] = text }
+            }
+        }
+    }
+
+    // MARK: - Tópicos
+
+    /// A lista lateral tem uma seleção só: tópicos entram nela com prefixo.
+    static func topicSelection(_ id: String) -> String { "topic:" + id }
+
+    var selectedTopic: Topic? {
+        guard let selection = selectedMeetingID, selection.hasPrefix("topic:") else { return nil }
+        return topics.first { $0.id == String(selection.dropFirst(6)) }
+    }
+
+    func topics(of meeting: Meeting) -> [Topic] {
+        topics.filter { $0.meetingIDs.contains(meeting.id) }
+    }
+
+    func createTopic(name: String, linking meeting: Meeting? = nil) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let topic = Topics.create(name: trimmed, meetingIDs: meeting.map { [$0.id] } ?? [])
+        topics = Topics.load()
+        if meeting == nil { selectedMeetingID = Self.topicSelection(topic.id) }
+    }
+
+    func setLinked(_ linked: Bool, meeting: Meeting, topic: Topic) {
+        if linked {
+            Topics.link(meeting.id, to: topic.id)
+        } else {
+            Topics.unlink(meeting.id, from: topic.id)
+        }
+        topics = Topics.load()
+    }
+
+    func dismissSuggestion(meeting: Meeting, topic: Topic) {
+        topics = Topics.update(topic.id) { $0.dismissed = ($0.dismissed ?? []) + [meeting.id] }
+    }
+
+    func updateTopic(_ topic: Topic, name: String, description: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        topics = Topics.update(topic.id) {
+            if !trimmed.isEmpty { $0.name = trimmed }
+            $0.description = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    func deleteTopic(_ topic: Topic) {
+        Topics.delete(topic.id)
+        if selectedMeetingID == Self.topicSelection(topic.id) { selectedMeetingID = nil }
+        topics = Topics.load()
+    }
+
+    /// Gera (ou refaz) o resumo consolidado + linha do tempo do tópico.
+    func consolidate(_ topic: Topic) {
+        let key = Self.topicSelection(topic.id)
+        guard processingStage[key] == nil else { return }
+        processingStage[key] = "Gerando resumo do tópico…"
+        let store = self.store
+        Task.detached(priority: .userInitiated) {
+            var failure: String?
+            do {
+                _ = try Topics.consolidate(topic, store: store)
+            } catch {
+                failure = "\(error)"
+            }
+            await MainActor.run {
+                AppState.shared.processingStage[key] = nil
+                AppState.shared.topics = Topics.load()
+                if let failure { AppState.shared.lastError = failure }
+            }
+        }
+    }
+
+    func ask(_ question: String, aboutTopic topic: Topic) {
+        let key = Self.topicSelection(topic.id)
+        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !chatBusy.contains(key) else { return }
+        chatBusy.insert(key)
+        let store = self.store
+        Task.detached(priority: .userInitiated) {
+            var failure: String?
+            do {
+                try Topics.ask(trimmed, topic: topic, store: store, onPartial: AppState.partialSink(key))
+            } catch {
+                failure = "\(error)"
+            }
+            await MainActor.run {
+                AppState.shared.chatPartial[key] = nil
+                AppState.shared.chatBusy.remove(key)
+                AppState.shared.chatTick += 1
+                if let failure { AppState.shared.lastError = failure }
+            }
+        }
+    }
+
+    // MARK: - Classificação
+
+    /// Classifica de novo a pedido do usuário (descarta a correção manual).
+    func reclassify(_ meeting: Meeting) {
+        let key = "class:" + meeting.id
+        guard processingStage[key] == nil else { return }
+        processingStage[key] = "Classificando…"
+        let store = self.store
+        Task.detached(priority: .userInitiated) {
+            var failure: String?
+            do {
+                try Classifier.classify(meeting, store: store, force: true)
+            } catch {
+                failure = "\(error)"
+            }
+            await MainActor.run {
+                AppState.shared.processingStage[key] = nil
+                AppState.shared.speakersTick += 1
+                if let failure { AppState.shared.lastError = failure }
+            }
+        }
+    }
+
+    // MARK: - Índice semântico
+
+    /// Indexa em 2º plano o que estiver pendente. Só depois da reunião e do
+    /// refino, com baixa prioridade, e para se uma gravação começar: o
+    /// embedding disputaria CPU/GPU com o Parakeet e a diarização.
+    func scheduleIndexing() {
+        guard !indexing, session == nil, SemanticIndex.enabled else { return }
+        indexing = true
+        let store = self.store
+        let flag = recordingFlag
+        Task.detached(priority: .background) {
+            let indexed = SemanticIndex.indexPending(store: store) { flag.value }
+            await MainActor.run {
+                AppState.shared.indexing = false
+                if indexed > 0 { AppState.shared.dlog("índice semântico: \(indexed) reunião(ões) indexada(s)") }
+            }
+        }
+    }
+
+    private func runSemanticSearch(_ text: String) {
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.count >= 3, SemanticIndex.enabled else {
+            if !semanticHits.isEmpty { semanticHits = [:] }
+            return
+        }
+        let store = self.store
+        Task.detached(priority: .userInitiated) {
+            let hits = (try? SemanticIndex.search(query, store: store, limit: 30, perMeeting: 1)) ?? []
+            let best = Dictionary(
+                hits.filter { $0.score >= SemanticIndex.searchThreshold }.map { ($0.meetingID, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            await MainActor.run {
+                // descarta se o usuário já digitou outra coisa
+                guard AppState.shared.searchText.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+                AppState.shared.semanticHits = best
+            }
+        }
+    }
+}
+
+/// Bandeira "gravando agora", legível de qualquer thread.
+final class RecordingFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recording = false
+
+    var value: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return recording
+    }
+
+    func set(_ newValue: Bool) {
+        lock.lock()
+        recording = newValue
+        lock.unlock()
     }
 }

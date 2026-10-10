@@ -30,14 +30,30 @@ public enum LLM {
     // MARK: - Geração
 
     /// Gera texto com o provider selecionado nas configurações (ou o override).
-    public static func generate(prompt: String, input: String, provider override: LLMProviderID? = nil) throws -> String {
+    ///
+    /// - `fast`: tarefa curta (classificação, chat ao vivo). No Claude troca o
+    ///   modelo pelo `fastClaudeModel`; os outros motores seguem como estão.
+    /// - `onPartial`: recebe o texto acumulado enquanto a resposta chega. Só o
+    ///   Claude e o Ollama transmitem aos poucos; nos demais o chamador recebe
+    ///   apenas o retorno final.
+    public static func generate(
+        prompt: String,
+        input: String,
+        provider override: LLMProviderID? = nil,
+        fast: Bool = false,
+        onPartial: (@Sendable (String) -> Void)? = nil
+    ) throws -> String {
         let settings = SeedSettings.load()
         let prompt = prompt + "\n\n" + inlineResponseInstructions
         switch override ?? settings.provider {
-        case .claude: return try runClaude(prompt: prompt, input: input)
+        case .claude:
+            return try runClaude(prompt: prompt, input: input,
+                                 model: fast ? settings.fastClaudeModel : settings.claudeModel,
+                                 onPartial: onPartial)
         case .codex: return try runCodex(prompt: prompt, input: input)
         case .antigravity: return try runAntigravity(prompt: prompt, input: input)
-        case .ollama: return try runOllama(prompt: prompt, input: input, model: settings.ollamaModel)
+        case .ollama:
+            return try runOllama(prompt: prompt, input: input, model: settings.ollamaModel, onPartial: onPartial)
         }
     }
 
@@ -82,16 +98,32 @@ public enum LLM {
 
     // MARK: - Backends
 
-    static func runClaude(prompt: String, input: String) throws -> String {
+    static func runClaude(
+        prompt: String,
+        input: String,
+        model: String? = nil,
+        onPartial: (@Sendable (String) -> Void)? = nil
+    ) throws -> String {
         guard let binary = findBinary("claude") else {
             throw SeedError("Claude Code não encontrado. Instale e faça login, ou troque o provider nas Preferências.")
         }
         // Sem --model o claude -p herda o default da conta (pode ser um modelo
         // caro tipo Fable/Opus); "sonnet" segura o limite semanal no volume de reuniões.
-        var arguments = ["-p", prompt, "--output-format", "json"]
-        let model = SeedSettings.load().claudeModel.trimmingCharacters(in: .whitespaces)
+        var arguments = ["-p", prompt, "--output-format", onPartial == nil ? "json" : "stream-json"]
+        if onPartial != nil { arguments += ["--verbose", "--include-partial-messages"] }
+        let model = (model ?? SeedSettings.load().claudeModel).trimmingCharacters(in: .whitespaces)
         if !model.isEmpty, model != "default" {
             arguments += ["--model", model]
+        }
+        if let onPartial {
+            let stream = ClaudeStream()
+            _ = try runProcess(binary, arguments: arguments, stdin: input) { line in
+                if stream.consume(line) { onPartial(stream.text) }
+            }
+            guard let result = stream.result else {
+                throw SeedError(stream.failure ?? "não consegui interpretar a resposta do claude -p")
+            }
+            return result
         }
         let output = try runProcess(binary, arguments: arguments, stdin: input)
         guard
@@ -195,9 +227,17 @@ public enum LLM {
         return response
     }
 
-    static func runOllama(prompt: String, input: String, model: String) throws -> String {
+    static func runOllama(
+        prompt: String,
+        input: String,
+        model: String,
+        onPartial: (@Sendable (String) -> Void)? = nil
+    ) throws -> String {
         guard ollamaServerUp() else {
             throw SeedError("servidor do Ollama fora do ar (abra o app do Ollama ou rode 'ollama serve').")
+        }
+        if let onPartial {
+            return try OllamaStream(model: model, prompt: prompt, input: input, onPartial: onPartial).run()
         }
         let body: [String: Any] = [
             "model": model,
@@ -232,14 +272,19 @@ public enum LLM {
     /// para o lookup via login shell.
     public static func findBinary(_ name: String) -> String? {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [
+        var candidates = [
             "\(home)/.local/bin/\(name)",
             "\(home)/.claude/local/\(name)",
             "/opt/homebrew/bin/\(name)",
             "/usr/local/bin/\(name)",
             "\(home)/.npm-global/bin/\(name)",
         ]
-        for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
+        // instalações via nvm ficam fora do PATH de apps GUI (versão mais nova primeiro)
+        let nvm = "\(home)/.nvm/versions/node"
+        let versions = ((try? FileManager.default.contentsOfDirectory(atPath: nvm)) ?? [])
+            .sorted { $0.compare($1, options: .numeric) == .orderedDescending }
+        candidates += versions.map { "\(nvm)/\($0)/bin/\(name)" }
+        for path in candidates where isRunnable(path) {
             return path
         }
         let probe = Process()
@@ -253,11 +298,26 @@ public enum LLM {
             probe.waitUntilExit()
             let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if let out, !out.isEmpty, FileManager.default.isExecutableFile(atPath: out) {
+            if let out, !out.isEmpty, isRunnable(out) {
                 return out
             }
         } catch {}
         return nil
+    }
+
+    /// Executável de verdade: binário Mach-O ou script com shebang. Um arquivo
+    /// de texto com bit de execução (ex.: o stub "native binary not installed"
+    /// que o npm deixa em /usr/local/bin) falha no exec com "Exec format error"
+    /// e esconderia a instalação boa que vem depois na lista.
+    static func isRunnable(_ path: String) -> Bool {
+        guard FileManager.default.isExecutableFile(atPath: path),
+              let handle = FileHandle(forReadingAtPath: path) else { return false }
+        defer { try? handle.close() }
+        let head = [UInt8](handle.readData(ofLength: 4))
+        guard head.count == 4 else { return false }
+        if head[0] == 0x23, head[1] == 0x21 { return true }  // "#!"
+        let magic = UInt32(head[0]) << 24 | UInt32(head[1]) << 16 | UInt32(head[2]) << 8 | UInt32(head[3])
+        return [0xFEED_FACE, 0xFEED_FACF, 0xCEFA_EDFE, 0xCFFA_EDFE, 0xCAFE_BABE, 0xBEBA_FECA].contains(magic)
     }
 
     static func ollamaServerUp() -> Bool {
@@ -273,7 +333,8 @@ public enum LLM {
         arguments: [String],
         stdin: String?,
         currentDirectory: URL? = nil,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        onLine: ((String) -> Void)? = nil
     ) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -312,6 +373,27 @@ public enum LLM {
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
         }
         defer { watchdog.cancel() }
+        if let onLine {
+            // streaming: acompanha o arquivo de saída enquanto o processo roda,
+            // entregando só linhas completas (o stdout segue em arquivo privado)
+            let reader = try FileHandle(forReadingFrom: outputURL)
+            defer { try? reader.close() }
+            var pending = Data()
+            func drain() {
+                pending.append(reader.availableData)
+                while let newline = pending.firstIndex(of: 0x0A) {
+                    let line = pending[pending.startIndex..<newline]
+                    pending = pending[pending.index(after: newline)...]
+                    if !line.isEmpty { onLine(String(decoding: line, as: UTF8.self)) }
+                }
+            }
+            while process.isRunning {
+                drain()
+                Thread.sleep(forTimeInterval: 0.08)
+            }
+            drain()
+            if !pending.isEmpty { onLine(String(decoding: pending, as: UTF8.self)) }
+        }
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
@@ -337,5 +419,96 @@ public enum LLM {
         case .success(let value): return value
         case .failure(let error): throw error
         }
+    }
+}
+
+/// Acumula os eventos `stream-json` do `claude -p`: deltas de texto viram a
+/// resposta parcial; o evento `result` traz a resposta final.
+final class ClaudeStream {
+    private(set) var text = ""
+    private(set) var result: String?
+    private(set) var failure: String?
+
+    /// Devolve true quando a linha acrescentou texto parcial.
+    func consume(_ line: String) -> Bool {
+        guard let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              let type = json["type"] as? String else { return false }
+        if type == "result" {
+            if json["is_error"] as? Bool == true {
+                failure = "Claude: \((json["result"] as? String ?? "erro").prefix(400))"
+            } else {
+                result = json["result"] as? String
+            }
+            return false
+        }
+        guard type == "stream_event",
+              let event = json["event"] as? [String: Any],
+              event["type"] as? String == "content_block_delta",
+              let delta = event["delta"] as? [String: Any],
+              delta["type"] as? String == "text_delta",
+              let piece = delta["text"] as? String, !piece.isEmpty else { return false }
+        text += piece
+        return true
+    }
+}
+
+/// `/api/chat` do Ollama com `stream: true` (uma linha JSON por pedaço).
+final class OllamaStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let request: URLRequest
+    private let onPartial: @Sendable (String) -> Void
+    private let done = DispatchSemaphore(value: 0)
+    private var pending = Data()
+    private var text = ""
+    private var failure: String?
+
+    init(model: String, prompt: String, input: String, onPartial: @escaping @Sendable (String) -> Void) throws {
+        var request = URLRequest(url: URL(string: "http://localhost:11434/api/chat")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 600
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": model,
+            "stream": true,
+            "messages": [["role": "system", "content": prompt], ["role": "user", "content": input]],
+        ])
+        self.request = request
+        self.onPartial = onPartial
+    }
+
+    func run() throws -> String {
+        let session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        session.dataTask(with: request).resume()
+        done.wait()
+        if let failure { throw SeedError(failure) }
+        let answer = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !answer.isEmpty else { throw SeedError("resposta inválida do Ollama") }
+        return answer
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        pending.append(data)
+        while let newline = pending.firstIndex(of: 0x0A) {
+            let line = pending[pending.startIndex..<newline]
+            pending = pending[pending.index(after: newline)...]
+            consume(line)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if !pending.isEmpty { consume(pending) }
+        if let error, failure == nil, text.isEmpty { failure = "Ollama: \(error.localizedDescription)" }
+        done.signal()
+    }
+
+    private func consume(_ line: Data) {
+        guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return }
+        if let error = json["error"] as? String {
+            failure = "Ollama: \(error)"
+            return
+        }
+        guard let message = json["message"] as? [String: Any],
+              let piece = message["content"] as? String, !piece.isEmpty else { return }
+        text += piece
+        onPartial(text)
     }
 }

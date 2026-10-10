@@ -107,11 +107,14 @@ ferramentas de listagem/busca; não são caminhos livres de arquivos.
 
 | Ferramenta | Argumentos | Resultado |
 | --- | --- | --- |
-| `list_meetings` | `days=30`, `folder?`, `tag?`, `offset=0`, `limit=50` | Metadados, total e próxima página. `days` até 36500; `limit` até 200. |
-| `search_meetings` | `query` obrigatório; `days=90`, `offset=0`, `limit=50` | Reuniões e trechos encontrados em títulos, tags, resumos e transcrições. |
-| `get_meeting` | `id` | Metadados, participantes, notas e resumo. Textos limitados a 20000 caracteres; `summary_truncated` indica resumo cortado. |
+| `list_meetings` | `days=30`, `folder?`, `tag?`, `temperature?`, `flag?`, `offset=0`, `limit=50` | Metadados, total e próxima página. `days` até 36500; `limit` até 200. |
+| `search_meetings` | `query` obrigatório; `days=90`, `temperature?`, `flag?`, `offset=0`, `limit=50` | Reuniões e trechos encontrados em títulos, tags, resumos e transcrições. |
+| `get_meeting` | `id` | Metadados, participantes, notas, resumo, classificação e tópicos. Textos limitados a 20000 caracteres; `summary_truncated` indica resumo cortado. |
 | `get_summary` | `id`, `offset=0`, `limit=20000` | Página do resumo salvo, total de caracteres e `next_offset`. |
 | `get_transcript` | `id`, `offset=0`, `limit=20000` | Página da transcrição salva com timestamps, total de caracteres e `next_offset`. |
+| `semantic_search` | `query` obrigatório; `limit=10` | Trechos de transcrição mais próximos da consulta pelo sentido, com `start_seconds` e `score`. Retorna erro se a busca semântica estiver desligada ou o Ollama parado. |
+| `list_topics` | — | Tópicos (grupos de reuniões sobre o mesmo assunto) com descrição e contagem. |
+| `get_topic` | `topic_id` | Reuniões do tópico em ordem cronológica e o resumo consolidado salvo, se houver. |
 | `list_audio` | `id` | Trilhas `mic` (seu microfone) e `system` (áudio do Mac), disponibilidade e duração em segundos. |
 | `get_audio` | `id`, `track` (`mic` ou `system`), `start_seconds=0`, `duration_seconds=15` | Texto descritivo + bloco MCP `audio`, MIME `audio/wav`, base64. Duração máxima: 30 segundos. |
 

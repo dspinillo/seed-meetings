@@ -71,6 +71,35 @@ struct SeedSpikeMain {
             try await subdivideCommand(args)
         case "reassign":
             try reassignCommand(args)
+        case "classify":
+            try classifyCommand(args)
+        case "topic":
+            // seed-spike topic "Nome" ID1 ID2… [--ask "pergunta"]: cria o tópico se
+            // não existir e imprime o resumo consolidado ou a resposta do chat
+            let positional = args.filter { !$0.hasPrefix("--") && $0 != flagValue(args, "--ask") }
+            guard let name = positional.first else { throw SeedError("informe o nome do tópico") }
+            let store = MeetingStore()
+            let topic = Topics.load().first { $0.name == name }
+                ?? Topics.create(name: name, meetingIDs: Array(positional.dropFirst()))
+            if let question = flagValue(args, "--ask") {
+                print(try Topics.ask(question, topic: topic, store: store).last?.content ?? "")
+            } else {
+                print(try Topics.consolidate(topic, store: store))
+            }
+        case "index":
+            let store = MeetingStore()
+            for meeting in store.list() {
+                let done = try SemanticIndex.index(meeting, store: store)
+                print("\(meeting.id) \(done ? "indexada" : "sem alteração") — \(meeting.title)")
+            }
+        case "search":
+            guard let query = args.first else { throw SeedError("informe a consulta") }
+            let store = MeetingStore()
+            let titles = Dictionary(uniqueKeysWithValues: store.list().map { ($0.id, $0.title) })
+            for hit in try SemanticIndex.search(query, store: store, limit: 8, perMeeting: 2) {
+                print(String(format: "%.3f  %@ %@ — %@", hit.score, hit.stamp, titles[hit.meetingID] ?? hit.meetingID,
+                             String(hit.text.replacingOccurrences(of: "\n", with: " ").prefix(140))))
+            }
         case "detect":
             let diag = MeetingDetector.diagnose()
             print("Chrome aberto: \(diag.chromeRunning)")
@@ -102,6 +131,15 @@ struct SeedSpikeMain {
               seed-spike diarize PASTA_DA_REUNIAO
                   Raio-X da diarização: clusters crus vs após cleanClusters, com
                   airtime, cossenos entre clusters e matches de voiceprint.
+
+              seed-spike classify PASTA_DA_REUNIÃO
+                  Classifica a reunião (temperatura, flags, ferramentas, temas) e grava classificacao.json.
+              seed-spike topic "Nome" ID1 ID2… [--ask "pergunta"]
+                  Cria o tópico (se não existir) e gera o resumo consolidado, ou pergunta ao chat do tópico.
+              seed-spike index
+                  Gera o índice semântico das reuniões prontas (exige a busca semântica ligada e o Ollama).
+              seed-spike search "consulta"
+                  Busca por sentido nos trechos indexados.
 
             Para parar a gravação: Enter ou Ctrl+C.
 
@@ -508,10 +546,32 @@ struct SeedSpikeMain {
         guard let meeting = store.read(folderURL: folder) else {
             throw SeedError("meta.json não encontrado em \(folder.path)")
         }
-        let history = try MeetingChat.ask(positional[1], meeting: meeting, store: store)
+        // --stream mostra no stderr o tamanho da resposta parcial a cada pedaço
+        var onPartial: (@Sendable (String) -> Void)?
+        if args.contains("--stream") {
+            onPartial = { text in fputs("[stream] \(text.count) caracteres\n", stderr) }
+        }
+        let history = try MeetingChat.ask(positional[1], meeting: meeting, store: store, onPartial: onPartial)
         if let answer = history.last, answer.role == "assistant" {
             print(answer.content)
         }
+    }
+
+    // MARK: - classify (classificação de uma pasta de reunião existente)
+
+    static func classifyCommand(_ args: [String]) throws {
+        guard let path = args.first(where: { !$0.hasPrefix("--") }) else {
+            throw SeedError("informe a pasta da reunião")
+        }
+        let folder = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        let store = MeetingStore(rootURL: folder.deletingLastPathComponent())
+        guard let meeting = store.read(folderURL: folder) else {
+            throw SeedError("meta.json não encontrado em \(folder.path)")
+        }
+        let result = try Classifier.classify(meeting, store: store, force: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        print(String(decoding: try encoder.encode(result), as: UTF8.self))
     }
 
     // MARK: - reprocess (roda o pipeline do app numa pasta de reunião existente)
