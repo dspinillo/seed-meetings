@@ -12,7 +12,7 @@ são treinados com suas reuniões pelo Seed.
 
 ## O que fica no Mac
 
-Por padrão, `~/Documents/Seed/` contém:
+Por padrão, `~/Library/Application Support/Seed/` contém:
 
 | Arquivo | Conteúdo |
 | --- | --- |

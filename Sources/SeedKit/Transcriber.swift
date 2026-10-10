@@ -6,8 +6,14 @@ import Foundation
 public final class SpikeASR {
     public init() {}
     private var manager: AsrManager?
+    /// load() chega de 3 lados (warm-up do launch, tick ao vivo, pipeline);
+    /// sem trava, cada um carregava e recompilava o modelo em paralelo.
+    private let loadGate = AsyncGate()
 
     public func load() async throws {
+        if manager != nil { return }
+        await loadGate.acquire()
+        defer { loadGate.release() }
         if manager != nil { return }
         fputs("[asr] baixando/carregando Parakeet v3 (primeira vez baixa ~450 MB)...\n", stderr)
         var lastPercent = -1

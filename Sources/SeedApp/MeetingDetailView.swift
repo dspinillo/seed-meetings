@@ -9,6 +9,8 @@ struct MeetingDetailView: View {
     @State private var tab: Tab = .summary
     @State private var editedTitle: String = ""
     @State private var notesText: String = ""
+    @State private var summaryText: String?
+    @State private var transcriptText: String?
     @State private var speakers: [MeetingSpeaker] = []
     @State private var renameTarget: MeetingSpeaker?
     @State private var customName: String = ""
@@ -136,11 +138,16 @@ struct MeetingDetailView: View {
             reload()
         }
         .onChange(of: state.processingStage[meeting.id]) { _, stage in
-            if stage == nil { speakers = Speakers.load(for: meeting) }
+            if stage == nil {
+                speakers = Speakers.load(for: meeting)
+                reloadTexts()
+            }
         }
         .onChange(of: state.speakersTick) { _, _ in
             speakers = Speakers.load(for: meeting)
+            reloadTexts()
         }
+        .onChange(of: meeting) { _, _ in reloadTexts() }
         .onChange(of: state.notesTick) { _, _ in
             // nota por voz gravada em notas.md por fora do editor: recarrega
             // (só se mudou, para não resetar o cursor à toa)
@@ -170,6 +177,14 @@ struct MeetingDetailView: View {
         editedTitle = meeting.title
         notesText = state.store.readNotes(meeting) ?? ""
         speakers = Speakers.load(for: meeting)
+        reloadTexts()
+    }
+
+    /// Resumo e transcript ficam em @State: lidos do disco dentro do body,
+    /// eram relidos a cada re-render da janela.
+    private func reloadTexts() {
+        summaryText = state.store.readSummary(meeting)
+        transcriptText = state.store.readTranscript(meeting)
     }
 
     private var providerName: String {
@@ -564,11 +579,9 @@ struct MeetingDetailView: View {
     private var bodyText: String {
         switch tab {
         case .summary:
-            return state.store.readSummary(meeting)
-                ?? "Resumo ainda não disponível."
+            return summaryText ?? "Resumo ainda não disponível."
         case .transcript:
-            return state.store.readTranscript(meeting)
-                ?? "Transcrição ainda não disponível."
+            return transcriptText ?? "Transcrição ainda não disponível."
         case .notes:
             return notesText
         case .chat:

@@ -518,7 +518,7 @@ struct SeedSpikeMain {
 
     static func reprocessCommand(_ args: [String]) async throws {
         guard let path = args.first(where: { !$0.hasPrefix("--") }) else {
-            throw SeedError("informe a pasta da reunião (ex.: ~/Documents/Seed/20260706-185205)")
+            throw SeedError("informe a pasta da reunião (ex.: ~/Library/Application Support/Seed/20260706-185205)")
         }
         let folder = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         let store = MeetingStore(rootURL: folder.deletingLastPathComponent())

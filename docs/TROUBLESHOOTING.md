@@ -57,7 +57,7 @@ de ditar; o app não silencia o Meet/Teams por você.
 
 ## Dicionário já preenchido depois de reinstalar
 
-Atualizações preservam `~/Documents/Seed/.glossario.json`. Uma instalação nova
+Atualizações preservam `~/Library/Application Support/Seed/.glossario.json`. Uma instalação nova
 não inclui termos. Edite as entradas existentes na tela de Transcrição. Não
 substitua seu arquivo por um glossário de outra pessoa.
 

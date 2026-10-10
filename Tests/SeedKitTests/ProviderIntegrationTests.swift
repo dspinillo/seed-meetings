@@ -9,7 +9,9 @@ struct ProviderIntegrationTests {
     func realProvider(_ model: String) throws {
         // Exige diretório isolado: nunca lê o glossário ou as reuniões reais.
         let path = try #require(ProcessInfo.processInfo.environment["SEED_DATA_DIR"])
-        #expect(path != FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Seed").path)
+        #expect(path != SeedPaths.legacyDirectory.path)
+        #expect(path != FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Seed").path)
         let provider: LLMProviderID = model == "antigravity" ? .antigravity : .codex
         SeedSettings(provider: provider, codexModel: model).save()
         let root = SeedPaths.dataDirectory.appendingPathComponent(UUID().uuidString)
