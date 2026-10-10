@@ -291,8 +291,15 @@ public enum LLM {
         probe.executableURL = URL(fileURLWithPath: "/bin/zsh")
         probe.arguments = ["-lc", "command -v \(name)"]
         let pipe = Pipe()
+        let errorPipe = Pipe()
         probe.standardOutput = pipe
-        probe.standardError = Pipe()
+        probe.standardError = errorPipe
+        defer {
+            for handle in [pipe.fileHandleForReading, pipe.fileHandleForWriting,
+                           errorPipe.fileHandleForReading, errorPipe.fileHandleForWriting] {
+                try? handle.close()
+            }
+        }
         do {
             try probe.run()
             probe.waitUntilExit()

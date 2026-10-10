@@ -100,6 +100,13 @@ struct SeedSpikeMain {
                 print(String(format: "%.3f  %@ %@ — %@", hit.score, hit.stamp, titles[hit.meetingID] ?? hit.meetingID,
                              String(hit.text.replacingOccurrences(of: "\n", with: " ").prefix(140))))
             }
+        case "fdleak":
+            // diagnóstico: descritores abertos depois de N ciclos de detecção
+            func openFDs() -> Int { (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? -1 }
+            let rounds = Int(args.first ?? "") ?? 20
+            print("antes: \(openFDs()) descritores")
+            for _ in 0..<rounds { _ = MeetingDetector.diagnose() }
+            print("depois de \(rounds) ciclos: \(openFDs()) descritores")
         case "detect":
             let diag = MeetingDetector.diagnose()
             print("Chrome aberto: \(diag.chromeRunning)")
