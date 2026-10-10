@@ -21,7 +21,7 @@ SEED_DATA_DIR="$(mktemp -d)" swift test
 ```
 
 `SEED_DATA_DIR` aceita um caminho absoluto. É usado para preferências, glossário,
-reuniões e memória de vozes. Sem override, o app usa `~/Documents/Seed`.
+reuniões e memória de vozes. Sem override, o app usa `~/Library/Application Support/Seed`.
 Os testes normais não chamam os motores remotos. Para exercitar de verdade os
 CLIs autenticados (consome a cota da conta):
 
@@ -47,7 +47,7 @@ isso não valida a veracidade do conteúdo.
 1. Execute os testes locais e, quando alterar integrações, os testes reais.
 2. Revise documentos, exemplos e capturas para não publicar dados pessoais.
 3. Compile `make app` (inclui `seed-mcp`) e confira a assinatura com `codesign --verify --deep --strict dist/Seed.app`.
-4. Empacote somente o bundle. Nunca copie `~/Documents/Seed`, caches dos CLIs ou `.build` para a release.
+4. Empacote somente o bundle. Nunca copie `~/Library/Application Support/Seed`, caches dos CLIs ou `.build` para a release.
 5. Em builds comunitários, remova símbolos de debug (`strip -S`) antes de assinar a cópia de distribuição ad-hoc. Publique o zip e SHA-256 numa release.
 6. Execute `python3 scripts/audit-distribution.py` no diretório público antes de enviar.
 

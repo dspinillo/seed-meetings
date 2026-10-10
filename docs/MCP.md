@@ -82,7 +82,7 @@ e a interface para cadastrar o servidor variam:
 ```
 
 Para outra pasta de dados, adicione `"env": {"SEED_DATA_DIR": "/caminho/absoluto/dados-seed"}`
-à configuração de `seed`. Sem essa variável, o servidor lê `~/Documents/Seed`
+à configuração de `seed`. Sem essa variável, o servidor lê `~/Library/Application Support/Seed`
 da conta macOS que executa o cliente. Um cliente na nuvem não acessa esse stdio
 local diretamente; esta versão não oferece endpoint remoto.
 

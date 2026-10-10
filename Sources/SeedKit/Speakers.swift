@@ -24,7 +24,7 @@ public struct Voiceprint: Codable, Sendable {
     public var updatedAt: Date
 }
 
-/// Memória de vozes entre reuniões (JSON em ~/Documents/Seed/.voiceprints.json).
+/// Memória de vozes entre reuniões (.voiceprints.json na pasta de dados).
 public final class VoiceprintStore {
     private let fileURL: URL
 

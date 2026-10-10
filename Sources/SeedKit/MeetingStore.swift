@@ -1,6 +1,6 @@
 import Foundation
 
-/// Storage file-based: cada reunião é uma pasta em ~/Documents/Seed.
+/// Storage file-based: cada reunião é uma pasta na pasta de dados (SeedPaths).
 /// Transparente, sem banco — SQLite entra na Fase 3 junto com a busca.
 public final class MeetingStore {
     public let rootURL: URL

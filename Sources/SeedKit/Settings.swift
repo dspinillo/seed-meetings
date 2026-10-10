@@ -1,7 +1,7 @@
 import Foundation
 
 /// Configuração do Seed, compartilhada entre o app e o CLI
-/// (JSON transparente em ~/Documents/Seed/.config.json).
+/// (JSON transparente em .config.json na pasta de dados — ver SeedPaths).
 /// Decodificação retrocompatível: chaves ausentes caem nos padrões.
 public struct SeedSettings: Codable, Sendable {
     public var provider: LLMProviderID
@@ -84,10 +84,23 @@ public struct SeedSettings: Codable, Sendable {
         SeedPaths.dataDirectory.appendingPathComponent(".config.json")
     }
 
+    /// Cache em memória validado pelo mtime do arquivo: load() é chamado a
+    /// cada tick do detector (5s, na main thread) — um stat é barato; reler e
+    /// decodificar o JSON toda vez não. O mtime cobre edições de fora (CLI/MCP).
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var cache: (path: String, modified: Date?, settings: SeedSettings)?
+
     public static func load() -> SeedSettings {
-        guard let data = try? Data(contentsOf: fileURL),
-              let settings = try? JSONDecoder().decode(SeedSettings.self, from: data)
-        else { return SeedSettings() }
+        let url = fileURL
+        let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let cache, cache.path == url.path, cache.modified == modified {
+            return cache.settings
+        }
+        let settings = (try? Data(contentsOf: url))
+            .flatMap { try? JSONDecoder().decode(SeedSettings.self, from: $0) } ?? SeedSettings()
+        cache = (url.path, modified, settings)
         return settings
     }
 

@@ -15,7 +15,7 @@ public struct GlossaryEntry: Codable, Identifiable, Sendable, Equatable {
     }
 }
 
-/// Dicionário particular (~/Documents/Seed/.glossario.json): nomes de pessoas,
+/// Dicionário particular (.glossario.json na pasta de dados): nomes de pessoas,
 /// sistemas e termos que o ASR erra. Alimenta o prompt dos resumos/chat/follow-up
 /// (camada A) e a correção determinística do transcript (camada C).
 public enum Glossary {

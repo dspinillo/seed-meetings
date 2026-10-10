@@ -112,7 +112,7 @@ As telas são demonstrativas. Consulte a [política de privacidade técnica](doc
 
 ## Privacidade e instalação limpa
 
-Uma instalação nova começa sem reuniões, glossário, notas, nomes de pessoas ou memória de vozes. Não há credenciais nem dados de usuário no bundle. Atualizar o app preserva os dados que **você** já possui em `~/Documents/Seed`; reinstalar não apaga essa pasta.
+Uma instalação nova começa sem reuniões, glossário, notas, nomes de pessoas ou memória de vozes. Não há credenciais nem dados de usuário no bundle. Atualizar o app preserva os dados que **você** já possui em `~/Library/Application Support/Seed`; reinstalar não apaga essa pasta.
 
 O áudio é transcrito localmente. Ao pedir resumos, chat ou follow-ups a um motor remoto, o Seed envia o contexto necessário: transcrição, notas, glossário, resumo e/ou histórico recente. Os CLIs têm suas próprias configurações, registros e políticas. Para processamento de texto no dispositivo, escolha um **modelo local** do Ollama. A pasta de dados não é criptografada pelo app; backups e sincronização de Documentos, se configurados no macOS, também podem copiá-la.
 

@@ -149,7 +149,7 @@ struct PreferencesView: View {
                 .labelsHidden()
                 .fixedSize()
             }
-            row("Armazenamento", "~/Documents/Seed · transcrições e resumos ficam para sempre", last: true) {
+            row("Armazenamento", "~/Library/Application Support/Seed · transcrições e resumos ficam para sempre", last: true) {
                 valueChip(storageUsed)
             }
         case .transcricao:
@@ -472,8 +472,7 @@ struct PreferencesView: View {
 
     private func computeStorage() {
         Task.detached {
-            let root = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Documents/Seed")
+            let root = SeedPaths.dataDirectory
             var total: Int64 = 0
             if let enumerator = FileManager.default.enumerator(
                 at: root, includingPropertiesForKeys: [.totalFileAllocatedSizeKey]

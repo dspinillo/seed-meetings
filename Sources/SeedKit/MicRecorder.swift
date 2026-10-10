@@ -2,12 +2,11 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
-/// Log persistente da captura de mic (~/Documents/Seed/.mic.log) — o app GUI
+/// Log persistente da captura de mic (.mic.log na pasta de dados) — o app GUI
 /// não tem stderr visível e o bug de mic vazio de 10/07 só acontece em
 /// reuniões reais; este log é a caixa-preta para diagnosticar.
 enum MicLog {
-    static let url = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Documents/Seed/.mic.log")
+    static let url = SeedPaths.dataDirectory.appendingPathComponent(".mic.log")
     private static let formatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"

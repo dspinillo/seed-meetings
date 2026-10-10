@@ -37,6 +37,9 @@ final class AppState: ObservableObject {
     private var liveUtterances: [Utterance] = []
 
     private var searchCache: [String: String] = [:]
+    /// Reuniões com indexação em andamento; invalidar remove daqui para o
+    /// resultado antigo ser descartado e o próximo refresh reindexar.
+    private var searchIndexing: Set<String> = []
 
     var allFolders: [String] {
         Set(meetings.compactMap(\.folder)).sorted()
@@ -68,6 +71,8 @@ final class AppState: ObservableObject {
     private var meetTabMisses = 0
     private var lastAudibleAt = Date()
     private var monitorTask: Task<Void, Never>?
+    private var lastTickLine = ""
+    private var sigtermSource: DispatchSourceSignal?
 
     /// Silêncio na trilha do sistema que dispara o auto-stop (gravações detectadas).
     private let silenceLimitSeconds: Double = 150
@@ -75,8 +80,14 @@ final class AppState: ObservableObject {
     @Published var notificationsDenied = false
 
     private init() {
+        rotateDetectorLog()
+        installTerminationLogging()
         refresh()
-        store.purgeAudio(olderThanDays: SeedSettings.load().retentionDays)
+        let store = self.store
+        let retentionDays = SeedSettings.load().retentionDays
+        Task.detached(priority: .background) {
+            store.purgeAudio(olderThanDays: retentionDays)
+        }
         Notifier.shared.setup()
         Notifier.shared.checkAuthorization { [weak self] status in
             Task { @MainActor in
@@ -106,14 +117,19 @@ final class AppState: ObservableObject {
     /// legível (>5s, gravação em .caf sobrevive a crash), reprocessa; senão,
     /// marca como falha com explicação.
     private func recoverOrphans() {
-        for orphan in store.orphans() {
+        for orphan in meetings where orphan.status == .recording || orphan.status == .processing {
             var meeting = orphan
             let duration = Self.audioDuration(meeting.micURL) ?? Self.audioDuration(meeting.systemURL)
             if let duration, duration > 5 {
                 meeting.durationSeconds = max(meeting.durationSeconds, duration)
                 store.save(meeting)
                 dlog("resgate: reprocessando gravação órfã \(meeting.id) (\(Int(duration))s de áudio)")
-                process(meeting)
+                processingStage[meeting.id] = "Na fila…"
+                let recovered = meeting
+                Task { @MainActor in
+                    await self.waitUntilIdle()
+                    self.process(recovered)
+                }
             } else {
                 meeting.status = .failed
                 meeting.errorMessage = "Gravação interrompida (o app fechou durante a reunião) e o áudio não pôde ser recuperado."
@@ -125,11 +141,12 @@ final class AppState: ObservableObject {
         // refino interrompido (app fechou no meio): ready + refined=false com
         // áudio ainda em disco → re-enfileira o refino silencioso, idempotente
         let store = self.store
-        for meeting in store.list()
+        for meeting in meetings
         where meeting.status == .ready && meeting.refined == false
             && FileManager.default.fileExists(atPath: meeting.systemURL.path) {
             dlog("resgate: retomando refino interrompido de \(meeting.id)")
             Task.detached(priority: .utility) {
+                await AppState.shared.waitUntilIdle()
                 _ = await Pipeline.shared.process(meeting, store: store, silent: true)
                 await MainActor.run {
                     AppState.shared.searchCacheInvalidate(meeting.id)
@@ -141,6 +158,16 @@ final class AppState: ObservableObject {
         refresh()
     }
 
+    /// Resgates do launch esperam a máquina ficar livre: quem reabre o app
+    /// para gravar não pode disputar CPU/disco com ASR + diarização de uma
+    /// reunião antiga (somado à carga dos modelos, foi o que travou em 08/10).
+    private func waitUntilIdle() async {
+        try? await Task.sleep(nanoseconds: 30_000_000_000)
+        while session != nil {
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+        }
+    }
+
     private static func audioDuration(_ url: URL) -> Double? {
         guard let file = try? AVAudioFile(forReading: url), file.length > 0 else { return nil }
         return Double(file.length) / file.processingFormat.sampleRate
@@ -150,10 +177,30 @@ final class AppState: ObservableObject {
 
     func refresh() {
         meetings = store.list()
-        for meeting in meetings where searchCache[meeting.id] == nil && meeting.status == .ready {
-            let summary = store.readSummary(meeting) ?? ""
-            let transcript = store.readTranscript(meeting) ?? ""
-            searchCache[meeting.id] = (summary + " " + transcript).lowercased()
+        // índice de busca (resumo + transcript de cada reunião) montado fora
+        // da main thread — no launch isso segurava a janela até ler tudo
+        let pending = meetings.filter {
+            $0.status == .ready && searchCache[$0.id] == nil && !searchIndexing.contains($0.id)
+        }
+        guard !pending.isEmpty else { return }
+        searchIndexing.formUnion(pending.map(\.id))
+        let store = self.store
+        Task.detached(priority: .utility) {
+            var built: [String: String] = [:]
+            for meeting in pending {
+                let summary = store.readSummary(meeting) ?? ""
+                let transcript = store.readTranscript(meeting) ?? ""
+                built[meeting.id] = (summary + " " + transcript).lowercased()
+            }
+            let result = built
+            await MainActor.run {
+                let state = AppState.shared
+                for (id, text) in result where state.searchIndexing.remove(id) != nil {
+                    state.searchCache[id] = text
+                }
+                // busca digitada antes do índice ficar pronto: reavalia o filtro
+                if !state.searchText.isEmpty { state.objectWillChange.send() }
+            }
         }
     }
 
@@ -389,22 +436,28 @@ final class AppState: ObservableObject {
             }
         } else {
             guard settings.detectMeet || settings.detectTeams else {
-                detected = nil
+                if detected != nil { detected = nil }
                 return
             }
             let diag = await Task.detached {
                 MeetingDetector.diagnose(meetEnabled: settings.detectMeet, teamsEnabled: settings.detectTeams)
             }.value
-            dlog("tick chrome=\(diag.chromeRunning) tab=\(diag.meetingTab ?? "-") issue=\(diag.tabIssue ?? "-") teams=\(diag.teamsAppRunning) mic=\(diag.micInUse) → \(diag.result?.title ?? "nada")")
+            // só loga quando o diagnóstico muda: uma linha a cada 5s para
+            // sempre levou o .detector.log a 26 MB / 336 mil linhas
+            let tickLine = "tick chrome=\(diag.chromeRunning) tab=\(diag.meetingTab ?? "-") issue=\(diag.tabIssue ?? "-") teams=\(diag.teamsAppRunning) mic=\(diag.micInUse) → \(diag.result?.title ?? "nada")"
+            if tickLine != lastTickLine {
+                lastTickLine = tickLine
+                dlog(tickLine)
+            }
             guard let detection = diag.result else {
-                detected = nil
+                if detected != nil { detected = nil }
                 FloatingBubble.shared.hide()
                 // reunião acabou/sumiu: re-arma a notificação para a próxima
                 if !notifiedKeys.isEmpty { notifiedKeys.removeAll() }
                 return
             }
             if let until = dismissedUntil[detection.key], until > Date() { return }
-            detected = detection
+            if detected != detection { detected = detection }
             FloatingBubble.shared.show() // bolha de gravação já na detecção
             if !notifiedKeys.contains(detection.key) {
                 notifiedKeys.insert(detection.key)
@@ -414,11 +467,61 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Log de diagnóstico da detecção (~/Documents/Seed/.detector.log).
+    /// No launch, corta o .detector.log para a cauda recente se passou de 1 MB.
+    private func rotateDetectorLog() {
+        let url = store.rootURL.appendingPathComponent(".detector.log")
+        let size = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int) ?? 0
+        guard size > 1_000_000, let handle = try? FileHandle(forReadingFrom: url) else { return }
+        try? handle.seek(toOffset: UInt64(size - 200_000))
+        var tail = (try? handle.readToEnd()) ?? Data()
+        try? handle.close()
+        if let newline = tail.firstIndex(of: 0x0A) { tail = tail.suffix(from: newline + 1) }
+        try? tail.write(to: url, options: .atomic)
+    }
+
+    /// Caixa-preta do encerramento: em 07/10 e 08/10 o app saiu sozinho ~24s
+    /// depois de começar a gravar (SIGTERM vindo do próprio processo, sem
+    /// crash report) e nada no log dizia por quê. Agora fica registrado se a
+    /// saída veio por sinal ou pelo AppKit, e a gravação fecha os arquivos.
+    private func installTerminationLogging() {
+        signal(SIGTERM, SIG_IGN)
+        // fila de fundo: com a main travada o sinal ainda é atendido (e o log
+        // diz se ela estava respondendo — a pista que faltou nas duas mortes)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global(qos: .userInitiated))
+        source.setEventHandler { [weak self] in
+            self?.dlog("encerramento: SIGTERM recebido")
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    let state = AppState.shared
+                    state.dlog("encerramento: main respondeu (gravando=\(state.isRecording)) — fechando")
+                    state.session?.stop()
+                    exit(0)
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                self?.dlog("encerramento: main thread NÃO respondeu em 3s — saindo assim mesmo")
+                exit(0)
+            }
+        }
+        source.resume()
+        sigtermSource = source
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                let state = AppState.shared
+                state.dlog("encerramento: willTerminate do AppKit (gravando=\(state.isRecording))\n"
+                    + Thread.callStackSymbols.prefix(20).joined(separator: "\n"))
+                state.session?.stop()
+            }
+        }
+    }
+
+    /// Log de diagnóstico da detecção (.detector.log na pasta de dados).
     nonisolated func dlog(_ message: String) {
         let url = store.rootURL.appendingPathComponent(".detector.log")
         let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
+        formatter.dateFormat = "MM-dd HH:mm:ss"
         let line = "\(formatter.string(from: Date())) \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
         if let handle = try? FileHandle(forWritingTo: url) {
@@ -473,6 +576,7 @@ final class AppState: ObservableObject {
 
     func searchCacheInvalidate(_ id: String) {
         searchCache[id] = nil
+        searchIndexing.remove(id)
     }
 
     // MARK: - Notas por voz
