@@ -102,7 +102,8 @@ as ferramentas de texto automaticamente.
 
 ## Ferramentas e argumentos
 
-Todos os argumentos opcionais têm os padrões abaixo. IDs devem vir das
+`semantic_search`, `list_topics`, `get_topic` e os campos de classificação
+exigem a versão 0.3.0 ou superior. Todos os argumentos opcionais têm os padrões abaixo. IDs devem vir das
 ferramentas de listagem/busca; não são caminhos livres de arquivos.
 
 | Ferramenta | Argumentos | Resultado |

@@ -28,3 +28,21 @@ Validado em 11/09/2026 com o executável real, por JSON-RPC/stdio:
 
 O teste do agente valida consumo de texto/metadados via MCP. Não valida audição
 por um modelo: o áudio foi verificado no cliente de protocolo com decodificação WAV.
+
+## Versão 0.3.0
+
+Executada em 08–10/10/2026 em macOS/Apple Silicon.
+
+- 59 testes locais passaram, 13 deles novos: decodificação e listas fechadas da classificação, exigência de evidências, redução e validação de vetores, prompts de tarefa do embedding, divisão do transcript em trechos, janela recente do chat ao vivo, eventos de streaming do Claude e ordenação/compatibilidade dos tópicos.
+- `make test-mcp` validou as dez ferramentas, incluindo classificação e tópicos em `get_meeting`, filtros por temperatura e flag, `list_topics`, `get_topic` e o erro de `semantic_search` com a busca desligada.
+- Migração da pasta de dados numa instalação real: 109 arquivos e 2,0 GB movidos de Documentos (com 69 arquivos só no iCloud) para o novo local, com contagem e bytes idênticos.
+- Com cópias de reuniões reais em diretório isolado, pelo CLI de diagnóstico: classificação com Claude (Haiku) e Antigravity; streaming com Claude e Ollama; índice de 7 reuniões e 152 trechos, com reindexação idempotente; busca semântica; resumo consolidado e chat de tópico com trechos do índice.
+- Vazamento de descritores do detector medido em 25 ciclos: de 4 para 54 antes da correção, de 4 para 4 depois.
+- O app foi reiniciado com esta versão sobre a biblioteca real, recuperou uma gravação interrompida e manteve a detecção ativa.
+
+Não validado: inspeção visual das telas novas (tópicos, faixa de classificação,
+streaming no chat, novas preferências); classificação e streaming com o Codex;
+uma gravação completa de ponta a ponta com esta versão; a migração automática
+feita pelo próprio app (a pasta foi movida manualmente antes). Os limiares da
+busca semântica e da sugestão de tópico foram calibrados com poucas reuniões do
+mesmo gênero e são preliminares.

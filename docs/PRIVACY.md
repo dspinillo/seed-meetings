@@ -39,8 +39,11 @@ e mova sua pasta de dados para um backup antes de reabrir. Não faça isso duran
 uma gravação.
 
 O app não criptografa esses arquivos. A proteção depende da conta do macOS,
-permissões de arquivos, FileVault e backups. Se Documentos estiver sincronizado
-com iCloud ou outro serviço, os arquivos podem ser sincronizados por ele.
+permissões de arquivos, FileVault e backups. A pasta padrão fica fora de
+Documentos justamente para não ser sincronizada pelo iCloud Drive; se você
+apontar `SEED_DATA_DIR` para uma pasta sincronizada, os arquivos irão para esse
+serviço. Instalações vindas da 0.2.1 ou anterior têm a pasta `~/Documents/Seed`
+movida para o novo local na primeira abertura.
 
 ## O que é enviado a motores de IA
 
