@@ -25,6 +25,9 @@ Por padrão, `~/Library/Application Support/Seed/` contém:
 | `speakers.json` | Falantes, nomes e sugestões |
 | `resumo.md`, `notas.md`, `chat.json` | Resumo, notas e conversa |
 | `followup.md` | Rascunho de follow-up, quando gerado |
+| `classificacao.json` | Temperatura, flags, ferramentas, temas e trechos de evidência |
+| `indice.json` | Trechos do transcript e seus vetores, quando a busca semântica está ligada |
+| `topicos.json`, `.topicos-chat.json` | Tópicos, reuniões vinculadas, resumo consolidado e conversa de cada tópico |
 
 Notas por voz podem deixar arquivos de recuperação na pasta da reunião. Os
 modelos e CLIs também mantêm caches/configurações em seus próprios diretórios.
@@ -45,6 +48,8 @@ com iCloud ou outro serviço, os arquivos podem ser sincronizados por ele.
 - Chat ao vivo: transcrição parcial, notas, horário relativo, pergunta e histórico recente.
 - Chat após a reunião: resumo, transcrição, notas, pergunta e histórico recente.
 - Follow-up/tarefas: resumos e contexto necessário para o rascunho.
+- Classificação: resumo, transcrição e glossário, numa chamada separada depois do resumo.
+- Tópicos (resumo consolidado e chat): resumos e notas das reuniões vinculadas, a pergunta e o histórico recente. Com a busca semântica ligada, também os trechos de transcrição mais próximos da pergunta.
 
 O Seed não envia áudio aos motores de texto. Claude, Codex e Antigravity são
 processos externos autenticados pelo próprio usuário. Seus logs, configurações,
@@ -57,6 +62,13 @@ uma fronteira de segurança para configurações externas de um agente.
 Ollama é acessado em `localhost:11434`. **Somente modelos executados localmente**
 mantêm o processamento de texto no dispositivo. Modelos cloud do Ollama usam
 serviços remotos.
+
+A busca semântica é opcional e desligada por padrão. Quando ligada, os trechos
+do transcript e o texto das consultas são enviados ao Ollama em `localhost`
+para gerar vetores com o modelo de embedding configurado (padrão:
+`embeddinggemma-2:270m`, local). Os vetores ficam em `indice.json`, na pasta de
+cada reunião. Não aponte essa preferência para um modelo cloud do Ollama se
+quiser manter os transcripts no Mac.
 
 ## Retenção e compartilhamento
 

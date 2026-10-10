@@ -1,7 +1,18 @@
 # Roadmap: busca, tópicos e classificação
 
-Proposta de evolução discutida em outubro de 2026. Nada aqui está implementado;
-o documento registra decisões, ordem de trabalho e riscos.
+Proposta de evolução discutida em outubro de 2026. O documento registra
+decisões, ordem de trabalho e riscos, e agora também o que já foi entregue.
+
+## Estado
+
+| Item | Estado |
+| --- | --- |
+| 0. Travamento na abertura | **Feito** (#2). |
+| 1. Tópicos | **Feito**, exceto seleção múltipla na biblioteca (o vínculo é por reunião, no menu de contexto). |
+| 2. Classificação | **Feito.** |
+| 3. Índice semântico | **Fase A feita** (Ollama, opcional, desligada por padrão). Fase B (MLX Swift) não iniciada. Limiares com calibração preliminar. |
+| 4. Chat ao vivo mais rápido | **Feito** para Claude Code e Ollama (streaming); modelo rápido só no Claude. Codex e Antigravity seguem sem streaming. |
+| 5. Jev | Não iniciado. |
 
 ## Resumo das decisões
 
@@ -16,8 +27,7 @@ o documento registra decisões, ordem de trabalho e riscos.
 
 ## Pré-requisito: travamento na abertura
 
-Antes das funcionalidades abaixo, é preciso resolver dois problemas que podem
-travar o app. Já existe uma correção local, ainda fora do repositório.
+Resolvido na #2. Eram dois problemas que podiam travar o app:
 
 1. **Dados em `~/Documents/Seed`** (`Sources/SeedKit/SeedPaths.swift`). Com
    Documentos no iCloud, áudios e transcripts são sincronizados. Com “Otimizar
@@ -26,9 +36,11 @@ travar o app. Já existe uma correção local, ainda fora do repositório.
 2. **Leitura de tudo na abertura** (`AppState.refresh()`). O cache de busca lê
    resumo e transcript de todas as reuniões de forma síncrona.
 
-Direção: guardar os dados fora de Documentos (por exemplo
-`~/Library/Application Support/Seed`) e migrar uma vez sem apagar a pasta
-antiga. Montar o cache de busca em segundo plano e sob demanda.
+O que foi feito: os dados passaram para `~/Library/Application Support/Seed`,
+com migração automática no primeiro launch, e o cache de busca é montado em
+segundo plano. Diferente da direção original, a pasta antiga é **movida**, não
+copiada: mantê-la em Documentos deixaria os áudios sincronizando no iCloud e
+duas bibliotecas divergentes.
 
 ## 1. Tópicos: ligar reuniões sobre o mesmo assunto
 
@@ -48,6 +60,14 @@ cada reunião fica em uma pasta só, mas pode pertencer a vários tópicos.
 - **MCP:** `list_topics` e `get_topic`.
 - **Depois (fase 3):** sugestão automática de tópico ao terminar uma reunião,
   confirmada pelo usuário, no mesmo estilo de “Quem é quem”.
+
+**Como ficou:** `topicos.json` guarda nome, descrição, reuniões e o resumo
+consolidado; a conversa de cada tópico fica em `.topicos-chat.json`. O vínculo
+é feito pelo menu de contexto da reunião (uma por vez; a seleção múltipla ficou
+de fora). Linha do tempo e resumo consolidado saem na mesma geração, com as
+seções “Onde estamos”, “Linha do tempo”, “Resolvido”, “Em aberto” e “Mudanças
+de rumo”. A sugestão automática aparece como chip na tela da reunião quando o
+índice semântico está ligado; não há aviso ao terminar a gravação.
 
 ## 2. Classificação da reunião
 
@@ -79,6 +99,13 @@ decodificar, o Seed tenta outra vez, como já faz com o validador do resumo.
 - Saída estruturada nativa, como `--output-schema` no Codex e `format` com
   schema no Ollama, pode ser adotada depois, onde existir. O formato pedido no
   prompt, com validação, funciona nos quatro motores.
+
+**Como ficou:** a classificação roda depois do resumo rápido, do refino e de
+“Refazer o resumo”, e pode ser desligada em Preferências → Resumos. Sem
+evidências, a resposta não pode marcar `tensa`/`conflituosa` nem flags: é
+rejeitada e pedida de novo, uma vez. Uma classificação corrigida à mão não é
+sobrescrita pelas execuções automáticas. Ferramentas e temas aparecem como
+chips que viram tag com um clique.
 
 **Cuidados**
 
@@ -125,6 +152,23 @@ Apache 2.0.
 - Comparação direta com o `cosine` que já existe. Com 256 dimensões, o índice
   ocupa cerca de 1 KB por trecho.
 
+**Como ficou (fase A):** modelo `embeddinggemma-2:270m` (só texto) pelo
+`/api/embed` do Ollama, vetores cortados para 256 dimensões e renormalizados,
+gravados em `indice.json` na pasta de cada reunião com `model`, `dims` e a data
+do transcript — mudar qualquer um deles reindexa. A indexação roda em segundo
+plano depois do refino e para se uma gravação começar. Vetor com NaN, infinito
+ou norma nula é erro, não é gravado.
+
+**Calibração preliminar.** Os scores desse modelo ficam comprimidos. Numa
+amostra de 152 trechos de 7 reuniões reais em português, consultas sem relação
+chegaram a 0,61–0,66 (uma a 0,71) e consultas relacionadas ficaram em
+0,70–0,79; o limiar da busca ficou em 0,70. Z-score e centralização pelo vetor
+médio do acervo não separaram melhor. Entre vetores médios de reuniões, a
+similaridade foi de 0,89–0,92 para assuntos diferentes do mesmo gênero e 0,98
+para o mesmo assunto; o limiar da sugestão de tópico ficou em 0,93. São poucos
+dados e todos do mesmo tipo de reunião: rever com um acervo maior antes de
+ligar por padrão.
+
 **Riscos**
 
 | Risco | Mitigação |
@@ -145,6 +189,12 @@ pergunta e da resposta sem streaming. Melhorias independentes:
 - streaming da resposta (`stream-json` no Claude e no Antigravity);
 - para perguntas sobre tempo, como “o que perdi nos últimos 5 min?”, enviar só a
   janela recente do transcript, recortada por `[mm:ss]`.
+
+**Como ficou:** as três melhorias entraram para o Claude Code (modelo rápido
+configurável, padrão Haiku, e `stream-json`); o Ollama ganhou streaming; a
+janela recente vale para todos os motores. O streaming também atende o chat
+depois da reunião e o chat do tópico. Antigravity e Codex continuam respondendo
+só ao final.
 
 ## Jev (TypeSafe AI): por que fica de fora
 

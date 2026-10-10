@@ -19,6 +19,9 @@ Grave reuniões no Mac, acompanhe a transcrição, anote ideias e converse com o
 | Notas por voz | Atalho global configurável, em modo segurar ou apertar para iniciar/parar. O ditado vira nota com marca de tempo; sem reunião, vira nota avulsa do dia. |
 | Chat durante a reunião | Pergunte “o que perdi nos últimos 5 minutos?” ou “qual foi o prazo?”. Usa a transcrição parcial e as notas disponíveis naquele momento. |
 | Chat depois da reunião | Pergunte sobre decisões, responsáveis e pendências. Usa resumo, notas, transcrição e histórico recente; a conversa ao vivo continua na mesma reunião. |
+| Tópicos | Ligue reuniões de títulos diferentes sobre o mesmo assunto (botão direito → “Vincular a tópico”). Cada tópico tem a lista cronológica, um resumo consolidado com linha do tempo de decisões e pendências, e um chat sobre todas as reuniões. |
+| Classificação | Depois do resumo, o motor de IA marca temperatura (tranquila, neutra, tensa, conflituosa), flags, ferramentas e temas, sempre com trechos de evidência. Pode ser corrigida à mão ou desligada em Preferências → Resumos. |
+| Busca semântica (opcional) | Com o Ollama rodando e um modelo de embedding baixado, a busca da biblioteca também acha reuniões pelo sentido, o chat do tópico recebe os trechos mais próximos da pergunta e o Seed sugere tópicos. Desligada por padrão. |
 | Vários motores de IA | Claude Code, Codex CLI, Antigravity CLI e Ollama. A escolha vale para resumo, chat e follow-ups. |
 | Modelos selecionáveis | Claude: Sonnet, Opus, Haiku ou padrão da conta. Codex: GPT-5.6 Sol, Luna (Lua), Terra, GPT-6 Astra ou padrão do CLI. Ollama: nome do modelo instalado. |
 | Resumos na tela | O conteúdo final é exibido na aba Resumo. Respostas que apenas entregam um link são rejeitadas pelo validador de formato e têm uma nova tentativa. |
@@ -83,7 +86,7 @@ As capturas ilustram o layout; o seletor de modelos do Codex foi acrescentado ap
 
 1. Abra o Seed. Autorize o microfone e a captura de áudio do sistema quando o macOS solicitar. Para detectar Meet no Chrome, autorize também Automação do Chrome.
 2. Entre numa reunião e aceite a sugestão **Gravar**, ou inicie manualmente pelo app. O Seed deve permanecer aberto para detectar chamadas.
-3. Acompanhe a transcrição e escreva em **Minhas notas**. Abra o chat ao vivo para consultar o que já foi transcrito. “Ao vivo” se refere ao contexto atualizado; a resposta aparece ao terminar a geração, não token a token.
+3. Acompanhe a transcrição e escreva em **Minhas notas**. Abra o chat ao vivo para consultar o que já foi transcrito. Com Claude Code ou Ollama a resposta aparece enquanto é gerada; com Codex e Antigravity, ao terminar. No Claude, o chat ao vivo usa o modelo rápido escolhido nas Preferências.
 4. Para ditar uma nota, use o atalho definido em Preferências → Geral (padrão: **⌥ Espaço**, segurar). **Silencie seu microfone na chamada antes de ditar**: o Seed omite esse trecho da própria trilha da reunião, mas não controla o mute do Meet/Teams. Se o reconhecimento falhar, conserva o áudio da nota para recuperação.
 5. Pare a gravação. O resumo aparece na tela; acompanhe o refino em segundo plano. Confirme os nomes dos participantes e gere novamente quando necessário.
 6. Consulte o chat, copie o resumo, organize a reunião ou gere um rascunho de follow-up.
