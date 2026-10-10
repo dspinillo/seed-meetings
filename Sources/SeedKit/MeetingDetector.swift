@@ -110,6 +110,16 @@ public enum MeetingDetector {
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
+        // fecha os pipes em todos os caminhos: sem isso cada ciclo (a cada 5s)
+        // deixava 2 descritores abertos e, horas depois, o app esgotava o
+        // limite — o osascript não rodava mais ("Bad file descriptor") e a
+        // detecção morria em silêncio até reiniciar
+        defer {
+            for pipe in [stdout, stderr] {
+                try? pipe.fileHandleForReading.close()
+                try? pipe.fileHandleForWriting.close()
+            }
+        }
         do {
             try process.run()
         } catch {
