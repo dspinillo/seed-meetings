@@ -19,6 +19,33 @@ struct LibraryView: View {
     private var splitView: some View {
         NavigationSplitView {
             List(selection: $state.selectedMeetingID) {
+                Section("Tópicos") {
+                    ForEach(visibleTopics) { topic in
+                        Label {
+                            HStack {
+                                Text(topic.name).lineLimit(1)
+                                Spacer()
+                                Text("\(topic.meetingIDs.count)")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        } icon: {
+                            Image(systemName: "number")
+                        }
+                        .tag(AppState.topicSelection(topic.id))
+                        .contextMenu {
+                            Button("Apagar tópico", role: .destructive) { state.deleteTopic(topic) }
+                        }
+                    }
+                    Button {
+                        newTopicTarget = nil
+                        showNewTopicAlert = true
+                    } label: {
+                        Label("Novo tópico…", systemImage: "plus")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
                 if !state.allFolders.isEmpty {
                     Picker("Pasta", selection: $state.folderFilter) {
                         Text("Todas as reuniões").tag(String?.none)
@@ -37,6 +64,7 @@ struct LibraryView: View {
                                 .tag(meeting.id)
                                 .contextMenu {
                                     folderMenu(for: meeting)
+                                    topicMenu(for: meeting)
                                     if meeting.status == .failed || meeting.status == .ready {
                                         Button("Reprocessar") { state.process(meeting) }
                                     }
@@ -59,7 +87,9 @@ struct LibraryView: View {
             }
         } detail: {
             Group {
-                if let meeting = state.meeting(id: state.selectedMeetingID) {
+                if let topic = state.selectedTopic {
+                    TopicDetailView(topic: topic)
+                } else if let meeting = state.meeting(id: state.selectedMeetingID) {
                     MeetingDetailView(meeting: meeting)
                 } else {
                     ContentUnavailableView(
@@ -82,6 +112,16 @@ struct LibraryView: View {
                 newFolderName = ""
             }
             Button("Cancelar", role: .cancel) { newFolderName = "" }
+        }
+        .alert("Novo tópico", isPresented: $showNewTopicAlert) {
+            TextField("Nome do tópico (ex.: Planejamento Q4)", text: $newTopicName)
+            Button("Criar") {
+                state.createTopic(name: newTopicName, linking: newTopicTarget)
+                newTopicName = ""
+            }
+            Button("Cancelar", role: .cancel) { newTopicName = "" }
+        } message: {
+            Text("Um tópico reúne reuniões de títulos diferentes sobre o mesmo assunto.")
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
@@ -135,6 +175,41 @@ struct LibraryView: View {
     @State private var newFolderName = ""
     @State private var newFolderTarget: Meeting?
     @State private var showActionItems = false
+    @State private var showNewTopicAlert = false
+    @State private var newTopicName = ""
+    @State private var newTopicTarget: Meeting?
+
+    /// Com busca ativa, só os tópicos cujo nome ou descrição casam.
+    private var visibleTopics: [Topic] {
+        let query = state.searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return state.topics }
+        return state.topics.filter {
+            $0.name.lowercased().contains(query) || $0.description.lowercased().contains(query)
+        }
+    }
+
+    @ViewBuilder
+    private func topicMenu(for meeting: Meeting) -> some View {
+        Menu("Vincular a tópico") {
+            ForEach(state.topics) { topic in
+                let linked = topic.meetingIDs.contains(meeting.id)
+                Button {
+                    state.setLinked(!linked, meeting: meeting, topic: topic)
+                } label: {
+                    if linked {
+                        Label(topic.name, systemImage: "checkmark")
+                    } else {
+                        Text(topic.name)
+                    }
+                }
+            }
+            if !state.topics.isEmpty { Divider() }
+            Button("Novo tópico…") {
+                newTopicTarget = meeting
+                showNewTopicAlert = true
+            }
+        }
+    }
 
     @ViewBuilder
     private func folderMenu(for meeting: Meeting) -> some View {
@@ -206,6 +281,13 @@ struct MeetingRow: View {
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // achada pela busca semântica: mostra o trecho que casou
+                if let hit = state.semanticHits[meeting.id] {
+                    Text("≈ \(hit.stamp) \(hit.text.replacingOccurrences(of: "\n", with: " "))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
             }
             Spacer()
             trailing

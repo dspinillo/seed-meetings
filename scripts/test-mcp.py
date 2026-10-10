@@ -27,6 +27,8 @@ with tempfile.TemporaryDirectory(prefix='seed-mcp-test-') as directory:
     (folder / 'transcript.md').write_text(transcript)
     (folder / 'resumo.md').write_text('## TL;DR\nProjeto Aurora aprovado.')
     (folder / 'notas.md').write_text('Revisar orçamento.')
+    (folder / 'classificacao.json').write_text(json.dumps({'temperatura': 'tensa', 'temperatura_motivo': 'Prazo apertado.', 'evidencias': [{'momento': '00:01', 'trecho': 'orçamento aprovado'}], 'ferramentas': ['Zendesk'], 'temas': ['orçamento'], 'flags': ['risco_de_prazo']}))
+    (root / 'topicos.json').write_text(json.dumps([{'id': 'T1', 'name': 'Aurora', 'description': 'Projeto fictício', 'meetingIDs': [folder.name, 'inexistente'], 'createdAt': meta['startedAt'], 'summary': 'Resumo do tópico.'}]))
     with wave.open(str(folder / 'mic.wav'), 'wb') as wav:
         wav.setnchannels(2)
         wav.setsampwidth(2)
@@ -72,7 +74,21 @@ with tempfile.TemporaryDirectory(prefix='seed-mcp-test-') as directory:
             process.stdin.flush()
             assert rpc('ping')['result'] == {}
             names = {tool['name'] for tool in rpc('tools/list')['result']['tools']}
-            assert names == {'list_meetings', 'get_meeting', 'get_summary', 'get_transcript', 'search_meetings', 'list_audio', 'get_audio'}
+            assert names == {'list_meetings', 'get_meeting', 'get_summary', 'get_transcript', 'search_meetings', 'list_audio', 'get_audio',
+                             'semantic_search', 'list_topics', 'get_topic'}
+            detail = data('get_meeting', id=folder.name)
+            assert detail['classification']['temperatura'] == 'tensa' and detail['classification']['ferramentas'] == ['Zendesk']
+            assert detail['topics'] == [{'topic_id': 'T1', 'name': 'Aurora'}]
+            assert data('search_meetings', query='orçamento', temperature='tensa', flag='risco_de_prazo')['total'] == 1
+            assert data('search_meetings', query='orçamento', temperature='tranquila')['total'] == 0
+            assert data('list_meetings', flag='escalonamento')['total'] == 0
+            assert call('search_meetings', query='orçamento', temperature='quente')['error']['code'] == -32602
+            assert data('list_topics')['topics'] == [{'topic_id': 'T1', 'name': 'Aurora', 'description': 'Projeto fictício', 'meeting_count': 2}]
+            topic = data('get_topic', topic_id='T1')
+            assert [m['id'] for m in topic['meetings']] == [folder.name] and topic['summary'] == 'Resumo do tópico.'
+            assert call('get_topic', topic_id='nope')['result']['isError']
+            # busca semântica vem desligada por padrão: erro claro, não resultado vazio
+            assert call('semantic_search', query='orçamento')['result']['isError']
             listed = data('list_meetings')
             assert listed['total'] == 1 and listed['meetings'][0]['id'] == folder.name
             assert data('list_meetings', offset=5)['meetings'] == []
@@ -125,7 +141,7 @@ with tempfile.TemporaryDirectory(prefix='seed-mcp-test-') as directory:
             assert json.loads(process.stdout.readline())['error']['code'] == -32700
             assert rpc('unknown')['error']['code'] == -32601
             assert rpc('ping')['result'] == {}
-            print('OK: MCP stdio, 7 ferramentas, paginação integral, WAV/CAF, áudio decodificável, erros e isolamento de caminhos.')
+            print('OK: MCP stdio, 10 ferramentas, classificação, tópicos, paginação integral, WAV/CAF, áudio decodificável, erros e isolamento de caminhos.')
         finally:
             process.stdin.close()
             try:

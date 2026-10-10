@@ -27,6 +27,16 @@ public struct SeedSettings: Codable, Sendable {
     public var voiceNoteHotkey: String
     /// "hold" (segurar para falar) ou "toggle" (aperta para começar/terminar).
     public var voiceNoteMode: String
+    /// Modelo do Claude para tarefas curtas (classificação, chat ao vivo):
+    /// alias como em `claudeModel`. Só vale quando o motor é o Claude.
+    public var fastClaudeModel: String
+    /// Classifica cada reunião (temperatura, flags, ferramentas, temas) depois
+    /// do resumo — uma chamada pequena a mais por resumo gerado.
+    public var classifyMeetings: Bool
+    /// Índice semântico local via Ollama (`/api/embed`). Desligado por padrão:
+    /// exige o servidor rodando e o modelo baixado.
+    public var semanticSearch: Bool
+    public var embeddingModel: String
 
     public init(
         provider: LLMProviderID = .claude,
@@ -41,7 +51,11 @@ public struct SeedSettings: Codable, Sendable {
         codexModel: String = "default",
         micDeviceUID: String = "default",
         voiceNoteHotkey: String = "optSpace",
-        voiceNoteMode: String = "hold"
+        voiceNoteMode: String = "hold",
+        fastClaudeModel: String = "haiku",
+        classifyMeetings: Bool = true,
+        semanticSearch: Bool = false,
+        embeddingModel: String = "embeddinggemma-2:270m"
     ) {
         self.provider = provider
         self.ollamaModel = ollamaModel
@@ -56,6 +70,10 @@ public struct SeedSettings: Codable, Sendable {
         self.micDeviceUID = micDeviceUID
         self.voiceNoteHotkey = voiceNoteHotkey
         self.voiceNoteMode = voiceNoteMode
+        self.fastClaudeModel = fastClaudeModel
+        self.classifyMeetings = classifyMeetings
+        self.semanticSearch = semanticSearch
+        self.embeddingModel = embeddingModel
     }
 
     public init(from decoder: Decoder) throws {
@@ -74,6 +92,10 @@ public struct SeedSettings: Codable, Sendable {
         micDeviceUID = (try? container.decode(String.self, forKey: .micDeviceUID)) ?? defaults.micDeviceUID
         voiceNoteHotkey = (try? container.decode(String.self, forKey: .voiceNoteHotkey)) ?? defaults.voiceNoteHotkey
         voiceNoteMode = (try? container.decode(String.self, forKey: .voiceNoteMode)) ?? defaults.voiceNoteMode
+        fastClaudeModel = (try? container.decode(String.self, forKey: .fastClaudeModel)) ?? defaults.fastClaudeModel
+        classifyMeetings = (try? container.decode(Bool.self, forKey: .classifyMeetings)) ?? defaults.classifyMeetings
+        semanticSearch = (try? container.decode(Bool.self, forKey: .semanticSearch)) ?? defaults.semanticSearch
+        embeddingModel = (try? container.decode(String.self, forKey: .embeddingModel)) ?? defaults.embeddingModel
     }
 
     public var summaryTemplate: SummaryTemplate {

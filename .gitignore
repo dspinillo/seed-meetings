@@ -19,6 +19,10 @@ meta.json
 segments.json
 speakers.json
 chat.json
+classificacao.json
+indice.json
+topicos.json
+.topicos-chat.json
 followup.md
 .config.json
 .glossario.json

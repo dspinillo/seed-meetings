@@ -111,6 +111,10 @@ public final class Pipeline {
                 $0.status = .ready
                 $0.refined = false
             }
+            // fora do caminho rápido: o "resumo pronto" não espera a classificação
+            Task.detached(priority: .utility) { [self] in
+                classify(meeting, store: store)
+            }
             return updated
         } catch {
             // qualquer falha no caminho rápido cai no pipeline completo
@@ -220,6 +224,8 @@ public final class Pipeline {
                     speakersNote: Speakers.confidenceNote(speakers)
                 )
                 try summary.write(to: meeting.summaryURL, atomically: true, encoding: .utf8)
+                // roda de novo depois do refino: o transcript refinado é melhor
+                classify(meeting, store: store, provider: providerOverride)
             }
 
             // re-lê o meta antes do save final: durante o refino (minutos) o
@@ -239,6 +245,16 @@ public final class Pipeline {
                 $0.errorMessage = "\(error)"
             }
             return updated
+        }
+    }
+
+    /// Classificação é melhor esforço: uma falha aqui nunca derruba o resumo.
+    private func classify(_ meeting: Meeting, store: MeetingStore, provider: LLMProviderID? = nil) {
+        guard SeedSettings.load().classifyMeetings else { return }
+        do {
+            try Classifier.classify(meeting, store: store, provider: provider)
+        } catch {
+            fputs("[pipeline] classificação falhou: \(error)\n", stderr)
         }
     }
 
@@ -263,6 +279,7 @@ public final class Pipeline {
                 speakersNote: Speakers.confidenceNote(Speakers.load(for: meeting))
             )
             try summary.write(to: meeting.summaryURL, atomically: true, encoding: .utf8)
+            classify(meeting, store: store)
             updated = store.update(updated) { $0.status = .ready }
             return updated
         } catch {

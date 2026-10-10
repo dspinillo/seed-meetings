@@ -22,13 +22,22 @@ let toolDefinitions = [
     tool("list_meetings", "Lista reuniões por período, pasta e tag, com paginação. Não lê áudio.", [
         "days": number(1, 36500, "Últimos dias; padrão 30"), "limit": number(1, 200, "Reuniões por página; padrão 50"),
         "offset": number(0, 100_000_000, "Posição na lista; padrão 0"),
-        "folder": ["type": "string"], "tag": ["type": "string"]]),
+        "folder": ["type": "string"], "tag": ["type": "string"],
+        "temperature": ["type": "string", "enum": MeetingClassification.Temperatura.allCases.map(\.rawValue)],
+        "flag": ["type": "string", "enum": MeetingClassification.allowedFlags]]),
     tool("get_meeting", "Metadados, participantes, notas e resumo (até 20000 caracteres por texto). Para textos longos use get_summary/get_transcript.", ["id": idProperty], required: ["id"]),
     tool("get_summary", "Lê o resumo salvo com paginação. Não gera resumo nem chama IA.", paging, required: ["id"]),
     tool("get_transcript", "Lê transcrição salva com tempos. Continue com next_offset até null; pode ser parcial durante processamento.", paging, required: ["id"]),
-    tool("search_meetings", "Busca em título, tags, resumo e transcrição, com trechos e paginação.", [
+    tool("search_meetings", "Busca em título, tags, resumo e transcrição, com trechos e paginação. Filtra por temperatura e flag da classificação.", [
         "query": ["type": "string", "minLength": 1], "days": number(1, 36500, "Últimos dias; padrão 90"),
+        "temperature": ["type": "string", "enum": MeetingClassification.Temperatura.allCases.map(\.rawValue)],
+        "flag": ["type": "string", "enum": MeetingClassification.allowedFlags],
         "offset": number(0, 100_000_000, "Posição nos resultados; padrão 0"), "limit": number(1, 200, "Resultados por página; padrão 50")], required: ["query"]),
+    tool("semantic_search", "Busca por sentido nos trechos de transcrição (índice local via Ollama). Retorna trechos com [mm:ss] e score. Falha se a busca semântica estiver desligada nas Preferências ou o Ollama parado; nesse caso use search_meetings.", [
+        "query": ["type": "string", "minLength": 1], "limit": number(1, 50, "Trechos retornados; padrão 10")], required: ["query"]),
+    tool("list_topics", "Lista os tópicos (grupos de reuniões sobre o mesmo assunto) com a contagem de reuniões.", [:]),
+    tool("get_topic", "Tópico com suas reuniões em ordem cronológica e o resumo consolidado salvo, se houver. Não chama IA.", [
+        "topic_id": ["type": "string", "description": "ID retornado por list_topics"]], required: ["topic_id"]),
     tool("list_audio", "Lista trilhas mic/system, duração e disponibilidade. Não retorna bytes. Áudio pode ter expirado pela retenção.", ["id": idProperty], required: ["id"]),
     tool("get_audio", "Retorna trecho de até 30s em conteúdo MCP audio/wav (PCM mono 16kHz). Requer cliente/modelo com suporte a áudio; não transcreve. Os tempos são relativos à trilha escolhida.", [
         "id": idProperty, "track": ["type": "string", "enum": ["mic", "system"]],
@@ -72,6 +81,10 @@ func read(_ url: URL, _ meeting: Meeting) -> String? {
     guard safeFile(url, in: meeting.folderURL) else { return nil }
     return try? String(contentsOf: url, encoding: .utf8)
 }
+func classification(_ meeting: Meeting) -> MeetingClassification? {
+    safeFile(meeting.folderURL.appendingPathComponent("classificacao.json"), in: meeting.folderURL)
+        ? Classifier.load(for: meeting) : nil
+}
 func meta(_ meeting: Meeting) -> [String: Any] {
     ["id": meeting.id, "title": meeting.title, "started_at": ISO8601DateFormatter().string(from: meeting.startedAt),
      "duration_seconds": meeting.durationSeconds, "status": meeting.status.rawValue,
@@ -113,6 +126,11 @@ func call(_ name: String, _ args: [String: Any]) throws -> [String: Any] {
         for item in meetings() where item.startedAt >= cutoff {
             if let folder = args["folder"] as? String, item.folder?.lowercased() != folder.lowercased() { continue }
             if let tag = args["tag"] as? String, !item.tags.contains(where: { $0.lowercased() == tag.lowercased() }) { continue }
+            if args["temperature"] != nil || args["flag"] != nil {
+                guard let found = classification(item) else { continue }
+                if let wanted = args["temperature"] as? String, found.temperatura.rawValue != wanted { continue }
+                if let flag = args["flag"] as? String, !found.flags.contains(flag) { continue }
+            }
             var entry = meta(item)
             if let query = args["query"] as? String {
                 let texts = [item.title, item.tags.joined(separator: " "), read(item.summaryURL, item) ?? "", read(item.transcriptURL, item) ?? ""]
@@ -132,6 +150,27 @@ func call(_ name: String, _ args: [String: Any]) throws -> [String: Any] {
         let next = offset + items.count
         return structured(["meetings": items, "total": results.count, "next_offset": next < results.count ? next as Any : NSNull()])
     }
+    if name == "semantic_search" {
+        let known = Dictionary(uniqueKeysWithValues: meetings().map { ($0.id, $0) })
+        let hits = try SemanticIndex.search(args["query"] as! String, store: store, meetingIDs: Set(known.keys),
+                                            limit: value(args, "limit", 10))
+        return structured(["results": hits.map { hit -> [String: Any] in
+            ["id": hit.meetingID, "title": known[hit.meetingID]?.title ?? "", "score": Double(hit.score),
+             "start_seconds": hit.start, "text": hit.text]
+        }])
+    }
+    if name == "list_topics" {
+        return structured(["topics": Topics.load().map { ["topic_id": $0.id, "name": $0.name,
+            "description": $0.description, "meeting_count": $0.meetingIDs.count] }])
+    }
+    if name == "get_topic" {
+        guard let topic = Topics.load().first(where: { $0.id == args["topic_id"] as? String }) else {
+            throw SeedError("Tópico não encontrado. Use list_topics para obter IDs válidos.")
+        }
+        return structured(["topic_id": topic.id, "name": topic.name, "description": topic.description,
+            "meetings": Topics.meetings(of: topic, in: meetings()).map(meta),
+            "summary": topic.summary.map { String($0.prefix(20_000)) } as Any? ?? NSNull()])
+    }
     let item = try meeting(args)
     switch name {
     case "get_meeting":
@@ -142,6 +181,12 @@ func call(_ name: String, _ args: [String: Any]) throws -> [String: Any] {
         let summary = read(item.summaryURL, item)
         result["summary"] = summary.map { String($0.prefix(20_000)) } as Any? ?? NSNull()
         result["summary_truncated"] = (summary?.count ?? 0) > 20_000
+        result["classification"] = classification(item).map { found -> [String: Any] in
+            ["temperatura": found.temperatura.rawValue, "temperatura_motivo": found.temperaturaMotivo,
+             "evidencias": found.evidencias.map { ["momento": $0.momento, "trecho": $0.trecho] },
+             "ferramentas": found.ferramentas, "temas": found.temas, "flags": found.flags]
+        } as Any? ?? NSNull()
+        result["topics"] = Topics.load().filter { $0.meetingIDs.contains(item.id) }.map { ["topic_id": $0.id, "name": $0.name] }
         return structured(result)
     case "get_summary", "get_transcript":
         guard let text = read(name == "get_summary" ? item.summaryURL : item.transcriptURL, item) else {

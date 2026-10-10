@@ -44,7 +44,8 @@ public enum MeetingChat {
         _ question: String,
         meeting: Meeting,
         store: MeetingStore,
-        provider: LLMProviderID? = nil
+        provider: LLMProviderID? = nil,
+        onPartial: (@Sendable (String) -> Void)? = nil
     ) throws -> [ChatMessage] {
         let summary = store.readSummary(meeting) ?? "(sem resumo)"
         let notes = store.readNotes(meeting) ?? ""
@@ -80,7 +81,7 @@ public enum MeetingChat {
         \(question)
         """
 
-        let answer = try LLM.generate(prompt: prompt, input: input, provider: provider)
+        let answer = try LLM.generate(prompt: prompt, input: input, provider: provider, onPartial: onPartial)
         history.append(ChatMessage(role: "user", content: question))
         history.append(ChatMessage(role: "assistant", content: answer))
         save(history, for: meeting)
@@ -97,8 +98,10 @@ public enum MeetingChat {
         liveTranscript: String,
         notes: String,
         nowStamp: String,
-        provider: LLMProviderID? = nil
+        provider: LLMProviderID? = nil,
+        onPartial: (@Sendable (String) -> Void)? = nil
     ) throws -> [ChatMessage] {
+        let liveTranscript = recentWindow(of: liveTranscript, question: question, nowStamp: nowStamp)
         var history = history(for: meeting)
         let conversation = history.suffix(12)
             .map { "\($0.role == "user" ? "Você" : "Seed"): \($0.content)" }
@@ -129,10 +132,38 @@ public enum MeetingChat {
         \(question)
         """
 
-        let answer = try LLM.generate(prompt: prompt, input: input, provider: provider)
+        // chat ao vivo pede resposta em segundos: modelo rápido + streaming
+        let answer = try LLM.generate(prompt: prompt, input: input, provider: provider,
+                                      fast: true, onPartial: onPartial)
         history.append(ChatMessage(role: "user", content: question))
         history.append(ChatMessage(role: "assistant", content: answer))
         save(history, for: meeting)
         return history
+    }
+
+    /// Para perguntas sobre tempo ("o que perdi nos últimos 5 min?"), envia só
+    /// a janela recente do transcript (com 1 min de folga), recortada pelos
+    /// `[mm:ss]`. Outras perguntas recebem o transcript inteiro.
+    static func recentWindow(of transcript: String, question: String, nowStamp: String) -> String {
+        guard let match = question.range(
+            of: #"[uú]ltim[oa]s?\s+(\d{1,3})\s*(min|minuto)"#, options: [.regularExpression, .caseInsensitive]),
+              let minutes = Double(question[match].filter(\.isNumber)), minutes > 0,
+              let now = seconds(fromStamp: nowStamp) else { return transcript }
+        let cutoff = now - (minutes + 1) * 60
+        guard cutoff > 0 else { return transcript }
+        let kept = transcript.components(separatedBy: "\n\n").filter { block in
+            guard let stamp = seconds(fromStamp: block) else { return true }
+            return stamp >= cutoff
+        }
+        return kept.isEmpty ? transcript : kept.joined(separator: "\n\n")
+    }
+
+    /// Lê o `[mm:ss]` (ou `[hh:mm:ss]`) no início do texto.
+    static func seconds(fromStamp text: String) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("["), let close = trimmed.firstIndex(of: "]") else { return nil }
+        let parts = trimmed[trimmed.index(after: trimmed.startIndex)..<close].split(separator: ":").map { Double($0) }
+        guard (2...3).contains(parts.count), !parts.contains(where: { $0 == nil }) else { return nil }
+        return parts.reduce(0) { $0 * 60 + ($1 ?? 0) }
     }
 }

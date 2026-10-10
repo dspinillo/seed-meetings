@@ -33,6 +33,10 @@ struct MeetingDetailView: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 10)
 
+                MeetingInsightsBar(meeting: meeting)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+
                 HStack(spacing: 12) {
                     Picker("", selection: $tab) {
                         ForEach(Tab.allCases, id: \.self) { tab in
