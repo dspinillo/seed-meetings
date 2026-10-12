@@ -13,6 +13,7 @@ decisões, ordem de trabalho e riscos, e agora também o que já foi entregue.
 | 3. Índice semântico | **Fase A feita** (Ollama, opcional, desligada por padrão). Fase B (MLX Swift) não iniciada. Limiares com calibração preliminar. |
 | 4. Chat ao vivo mais rápido | **Feito** para Claude Code e Ollama (streaming); modelo rápido só no Claude. Codex e Antigravity seguem sem streaming. |
 | 5. Jev | Não iniciado. |
+| 6. Telas compartilhadas | Só plano (ver seção própria). |
 
 ## Resumo das decisões
 
@@ -213,6 +214,42 @@ Também exigiria um fornecedor a mais, com chave de API e envio do transcript a
 outra nuvem. Os números de qualidade e velocidade são do fabricante e não há
 avaliação em português.
 
+## Telas compartilhadas (plano, não iniciado)
+
+Inspirado na captura de telas do Granola: guardar imagens do que os outros
+apresentam e usar o conteúdo nas notas. Diferença de proposta: tudo local.
+
+- **Captura:** ScreenCaptureKit (macOS 14+), um frame da janela da reunião a
+  cada ~5 s durante a gravação. Começar por Meet e Teams no Chrome, que o
+  detector já localiza; Teams desktop e Zoom depois (janelas destacadas são
+  mais difíceis de identificar).
+- **O que é slide:** sem ler a interface do Meet. Slide fica parado e vídeo de
+  câmera muda sempre: guardar um frame só quando ficou estável por duas
+  amostras e difere do último guardado, comparando por blocos para tolerar as
+  miniaturas de câmera. Dispensa a permissão de Acessibilidade.
+- **Não capturar o que não deve:** antes de cada frame, conferir se a aba ativa
+  da janela ainda é a da reunião; se não for, pular.
+- **Texto:** OCR local (Vision, pt-BR) em cada tela guardada, gravado em
+  `telas.json` (momento, arquivo, texto). O texto entra nos prompts de resumo,
+  chat e classificação como "telas compartilhadas [mm:ss]" e no índice
+  semântico. Nenhuma imagem sai do Mac.
+- **Interface e MCP:** faixa "Telas" na reunião, com `[mm:ss]`; ferramentas
+  para listar e obter a imagem, no molde do áudio.
+- **Armazenamento:** pasta `telas/` na reunião, JPEG reduzido, teto de ~60 por
+  reunião (cerca de 20 MB).
+
+**Riscos:** permissão nova de Gravação de Tela, que o macOS volta a pedir de
+tempos em tempos; a heurística de "parado" erra com animações, vídeo embutido e
+demos ao vivo e precisa de calibração em chamadas reais; capturar tela de
+terceiros é mais sensível que áudio — desligado por padrão, com aviso ao ligar.
+
+**Decisões em aberto:** retenção (expirar com o áudio ou manter como o
+transcript); enviar só o texto do OCR ou também a imagem a motores
+multimodais; capturar ou não quando é o próprio usuário quem apresenta.
+
+**Primeiro passo:** um `seed-spike screens` que captura e deduplica numa
+chamada real, para validar a heurística antes de mexer no app.
+
 ## Ordem de trabalho
 
 0. Correção do travamento (pré-requisito).
@@ -221,3 +258,4 @@ avaliação em português.
 3. Índice com EmbeddingGemma 2: sugestão de tópico, recuperação e busca semântica.
 4. Chat ao vivo mais rápido. É independente e pode entrar a qualquer momento.
 5. Jev como opção, se um teste em português justificar.
+6. Telas compartilhadas, começando pelo spike no CLI.
