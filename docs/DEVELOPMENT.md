@@ -42,6 +42,32 @@ na conclusão normal. Codex recebe o prompt via stdin e devolve o resultado em
 bem-sucedido. O resumo tem validação de formato e uma tentativa de correção;
 isso não valida a veracidade do conteúdo.
 
+## CLI de diagnóstico
+
+`make cli` gera `.build/release/seed-spike`. Além de gravar, transcrever e
+resumir, ele exercita o núcleo sem abrir o app. Use sempre com `SEED_DATA_DIR`
+apontando para dados fictícios ou uma cópia:
+
+| Comando | O que faz |
+| --- | --- |
+| `seed-spike classify PASTA` | Classifica a reunião e grava `classificacao.json` (chama o motor). |
+| `seed-spike topic "Nome" ID… [--ask "pergunta"]` | Cria o tópico se não existir; gera o resumo consolidado ou pergunta ao chat do tópico (chama o motor). |
+| `seed-spike index` | Gera o índice semântico das reuniões prontas (Ollama). |
+| `seed-spike search "consulta"` | Trechos mais próximos e seus scores — útil para calibrar limiares. |
+| `seed-spike chat PASTA "pergunta" [--stream]` | Chat da reunião; `--stream` mostra o tamanho da resposta parcial a cada pedaço. |
+| `seed-spike fdleak N` | Descritores abertos antes e depois de N ciclos de detecção. |
+| `seed-spike detect` | Sinais usados pela detecção de reunião. |
+
+## Arquivos de dados
+
+Cada reunião é uma pasta com `meta.json`, áudio, `transcript.md`, `segments.json`,
+`speakers.json`, `resumo.md`, `notas.md`, `chat.json` e, quando gerados,
+`classificacao.json` e `indice.json`. Na raiz ficam `.config.json`,
+`.glossario.json`, `.voiceprints.json`, `topicos.json`, `.topicos-chat.json` e os
+logs `.detector.log` e `.mic.log`. Campos novos em arquivos existentes precisam
+ser opcionais na decodificação. O `.gitignore` do repositório já cobre esses
+nomes, para que dados de teste não sejam publicados por engano.
+
 ## Publicar uma versão
 
 1. Execute os testes locais e, quando alterar integrações, os testes reais.
@@ -65,6 +91,6 @@ interação no Terminal e retornar só o texto final para resumo e chat.
 
 ## MCP
 
-`make mcp` compila somente o servidor. `make test-mcp` valida as sete ferramentas
-por stdio, incluindo paginação e áudio WAV/CAF fictício. O guia [MCP](MCP.md)
+`make mcp` compila somente o servidor. `make test-mcp` valida as dez ferramentas
+por stdio, incluindo paginação, classificação, tópicos e áudio WAV/CAF fictício. O guia [MCP](MCP.md)
 descreve configuração de clientes, formatos de resposta e teste opcional com agente.

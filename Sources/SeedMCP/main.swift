@@ -233,7 +233,7 @@ while let line = readLine(strippingNewline: true) {
     case "initialize":
         let requested = params["protocolVersion"] as? String ?? ""
         result = ["protocolVersion": supportedVersions.contains(requested) ? requested : supportedVersions.last!,
-                  "capabilities": ["tools": [:] as [String: Any]], "serverInfo": ["name": "seed", "version": "0.2.1"]]
+                  "capabilities": ["tools": [:] as [String: Any]], "serverInfo": ["name": "seed", "version": "0.3.0"]]
     case "ping": result = [:]
     case "tools/list": result = ["tools": toolDefinitions]
     case "tools/call":

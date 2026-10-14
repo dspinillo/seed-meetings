@@ -23,16 +23,16 @@ Grave reuniões no Mac, acompanhe a transcrição, anote ideias e converse com o
 | Classificação | Depois do resumo, o motor de IA marca temperatura (tranquila, neutra, tensa, conflituosa), flags, ferramentas e temas, sempre com trechos de evidência. Pode ser corrigida à mão ou desligada em Preferências → Resumos. |
 | Busca semântica (opcional) | Com o Ollama rodando e um modelo de embedding baixado, a busca da biblioteca também acha reuniões pelo sentido, o chat do tópico recebe os trechos mais próximos da pergunta e o Seed sugere tópicos. Desligada por padrão. |
 | Vários motores de IA | Claude Code, Codex CLI, Antigravity CLI e Ollama. A escolha vale para resumo, chat e follow-ups. |
-| Modelos selecionáveis | Claude: Sonnet, Opus, Haiku ou padrão da conta. Codex: GPT-5.6 Sol, Luna (Lua), Terra, GPT-6 Astra ou padrão do CLI. Ollama: nome do modelo instalado. |
+| Modelos selecionáveis | Claude: Sonnet, Opus, Haiku ou padrão da conta. Codex: GPT-5.6 Sol, Luna (Lua), Terra, GPT-6 Astra ou padrão do CLI. Ollama: nome do modelo instalado. No Claude há ainda um modelo rápido (padrão: Haiku) para o chat ao vivo e a classificação. |
 | Resumos na tela | O conteúdo final é exibido na aba Resumo. Respostas que apenas entregam um link são rejeitadas pelo validador de formato e têm uma nova tentativa. |
 | Templates | Trabalho, 1:1, entrevista, aula e brainstorm. É possível gerar novamente com outro formato. |
 | Refino em segundo plano | Ao terminar, produz um resultado inicial e refina a transcrição/diarização. O novo resumo pode usar o mesmo motor, outro motor ou ser pulado. |
 | Dicionário pessoal | Cadastre grafias corretas, variantes e notas. Corrige variantes registradas na transcrição e fornece contexto à IA. Começa vazio. |
 | Detecção de reunião | Reconhece Meet no Chrome e Microsoft Teams com microfone em uso; oferece Gravar/Ignorar. Não começa a gravar sem confirmação. |
 | Parada automática | Pode encerrar ao sair da chamada ou após silêncio prolongado. Configurável. |
-| Organização | Busca em títulos e conteúdo, pastas, tags, renomeação e acesso à pasta de arquivos de cada reunião. |
+| Organização | Busca em títulos e conteúdo, pastas, tags, tópicos, renomeação e acesso à pasta de arquivos de cada reunião. |
 | Follow-ups e tarefas | Gera rascunhos para compartilhar e consolida suas pendências recentes. Não envia mensagens automaticamente. |
-| Integração MCP | Servidor incluído no app (0.2.1+): agentes consultam resumos, transcrições paginadas e trechos de áudio via MCP. |
+| Integração MCP | Servidor incluído no app (0.2.1+): agentes consultam resumos, transcrições paginadas e trechos de áudio via MCP. Desde a 0.3.0, também tópicos, classificação e busca semântica. |
 | Controles do Mac | App na barra de menus, indicador flutuante, abertura no login e seleção de microfone. |
 | Retenção | Expiração configurável do áudio bruto; transcrições, resumos e notas continuam armazenados. |
 
@@ -91,6 +91,22 @@ As capturas ilustram o layout; o seletor de modelos do Codex foi acrescentado ap
 5. Pare a gravação. O resumo aparece na tela; acompanhe o refino em segundo plano. Confirme os nomes dos participantes e gere novamente quando necessário.
 6. Consulte o chat, copie o resumo, organize a reunião ou gere um rascunho de follow-up.
 
+### Tópicos e classificação
+
+Para ligar reuniões sobre o mesmo assunto, clique com o botão direito numa reunião da biblioteca e escolha **Vincular a tópico** (ou crie um em **Novo tópico…**, na barra lateral). Uma reunião pode pertencer a vários tópicos. A tela do tópico mostra as reuniões em ordem cronológica, gera sob demanda um resumo consolidado com linha do tempo e tem um chat que responde com base em todas elas.
+
+Depois de cada resumo, o Seed pede ao motor de IA uma classificação da reunião: temperatura, flags, ferramentas e temas. Ela aparece logo abaixo do título. Clique no selo de temperatura para ver o motivo e os trechos de evidência, corrigir à mão ou classificar de novo; os chips de ferramentas e temas viram tag com um clique. A classificação vem só do texto — tom de voz e ironia se perdem — e descreve a reunião, não as pessoas. Ela custa uma chamada a mais ao motor por resumo; desligue em **Preferências → Resumos → Classificar reuniões** se preferir. Reuniões antigas só são classificadas quando você usa “Refazer o resumo”.
+
+### Busca semântica (opcional)
+
+Desligada por padrão. Para usar:
+
+```bash
+ollama pull embeddinggemma-2:270m
+```
+
+Deixe o Ollama aberto e ligue **Preferências → Resumos → Busca semântica (Ollama)**. O Seed indexa em segundo plano as reuniões já refinadas (nunca durante uma gravação). A partir daí, a busca da biblioteca também traz reuniões pelo sentido, marcadas com “≈” e o trecho que casou; o chat do tópico recebe os trechos de transcrição mais próximos da pergunta; e a tela da reunião pode sugerir um tópico, que você confirma ou dispensa. Os limiares de similaridade ainda são preliminares: espere alguns resultados fora do assunto.
+
 ### Dicionário e participantes
 
 Em **Preferências → Transcrição → Dicionário particular**, use **Adicionar termo**, preencha a grafia correta e, opcionalmente, as variantes separadas por vírgula e uma nota. As mudanças são salvas automaticamente. O dicionário influencia novas transcrições e novas gerações; para conteúdo antigo, reprocese ou gere novamente conforme a alteração.
@@ -117,7 +133,9 @@ As telas são demonstrativas. Consulte a [política de privacidade técnica](doc
 
 Uma instalação nova começa sem reuniões, glossário, notas, nomes de pessoas ou memória de vozes. Não há credenciais nem dados de usuário no bundle. Atualizar o app preserva os dados que **você** já possui em `~/Library/Application Support/Seed`; reinstalar não apaga essa pasta.
 
-O áudio é transcrito localmente. Ao pedir resumos, chat ou follow-ups a um motor remoto, o Seed envia o contexto necessário: transcrição, notas, glossário, resumo e/ou histórico recente. Os CLIs têm suas próprias configurações, registros e políticas. Para processamento de texto no dispositivo, escolha um **modelo local** do Ollama. A pasta de dados não é criptografada pelo app; backups e sincronização de Documentos, se configurados no macOS, também podem copiá-la.
+O áudio é transcrito localmente. Ao pedir resumos, chat ou follow-ups a um motor remoto, o Seed envia o contexto necessário: transcrição, notas, glossário, resumo e/ou histórico recente. Os CLIs têm suas próprias configurações, registros e políticas. Para processamento de texto no dispositivo, escolha um **modelo local** do Ollama. A pasta de dados não é criptografada pelo app; backups do Mac também podem copiá-la.
+
+Até a versão 0.2.1 os dados ficavam em `~/Documents/Seed`. Com Documentos sincronizado no iCloud, isso enviava os áudios à nuvem e travava o app quando o macOS removia os arquivos do disco. A partir da 0.3.0 a pasta é movida automaticamente para `~/Library/Application Support/Seed` na primeira abertura; se a migração não puder ser concluída (por exemplo, sem internet para baixar arquivos que estão só no iCloud), o app continua usando a pasta antiga e tenta de novo na próxima abertura.
 
 Leia [Privacidade e armazenamento](docs/PRIVACY.md) e [Segurança](SECURITY.md). Informe os participantes e observe as regras aplicáveis ao seu uso de gravações.
 
@@ -138,6 +156,8 @@ Veja [Desenvolvimento](docs/DEVELOPMENT.md) para arquitetura, testes reais dos m
 - Transcrição, diarização e IA podem errar. Revise conteúdo e atribuições antes de compartilhar.
 - O motor tem até cinco minutos por chamada. Respostas de resumo com formato inválido têm uma segunda tentativa; falha persistente é exibida e não substitui um resumo salvo.
 - Uma reunião longa pode exceder a janela de contexto ou a cota do modelo. Se necessário, troque o modelo ou reduza o material.
+- A classificação e as sugestões de tópico são estimativas. A resposta do chat só aparece aos poucos com Claude Code e Ollama; o modelo rápido existe apenas para o Claude.
+- A busca semântica depende do Ollama e de um modelo de embedding local; os limiares foram calibrados com poucas reuniões.
 - Os CLIs podem mudar. Atualize-os e consulte a solução de problemas se uma integração deixar de funcionar.
 
 ## Licença e créditos

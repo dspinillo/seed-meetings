@@ -49,6 +49,55 @@ de Automação do Chrome. Para Teams, confira o app e o uso do microfone.
 Preferências → Detecção → “Testar detecção agora” mostra os sinais usados.
 Detecção nunca inicia gravação sem confirmação; use gravação manual se necessário.
 
+Até a versão 0.2.1, a detecção podia parar depois de muitas horas com o app
+aberto (o `.detector.log` mostra `não consegui rodar o osascript: … Bad file
+descriptor`). Atualize para a 0.3.0 ou reinicie o Seed.
+
+## O app demora a abrir, trava ao gravar ou fecha sozinho
+
+Na 0.2.1 e anteriores os dados ficavam em `~/Documents/Seed`. Com Documentos no
+iCloud e “Otimizar Armazenamento do Mac”, o macOS remove os arquivos do disco e
+cada leitura espera o download. A 0.3.0 move a pasta para
+`~/Library/Application Support/Seed` na primeira abertura; essa primeira
+abertura pode demorar enquanto o macOS baixa o que estava só na nuvem.
+
+Confira também o espaço livre: gravação, modelos de reconhecimento e a memória
+virtual do macOS precisam de alguns gigabytes. Com o disco quase cheio o Mac
+inteiro pode ficar lento ou congelar.
+
+Se o app fechar sozinho, as últimas linhas de `.detector.log`, na pasta de
+dados, registram o encerramento (`encerramento: SIGTERM recebido`,
+`willTerminate do AppKit`) e se a interface estava respondendo. Uma gravação
+interrompida é retomada na próxima abertura, depois que a máquina ficar livre.
+
+## Claude não responde: “Exec format error”
+
+Algumas instalações via npm deixam em `/usr/local/bin/claude` um arquivo de texto
+que só imprime “claude native binary not installed”. Versões até a 0.2.1
+escolhiam esse arquivo. A 0.3.0 ignora executáveis que não são binários nem
+scripts e também procura em instalações do nvm. Rode `claude` no Terminal para
+confirmar que o CLI abre; se não abrir, reinstale-o.
+
+## A classificação não aparece
+
+Ela é gerada depois de um resumo novo (ou de “Refazer o resumo”); reuniões
+antigas não são classificadas sozinhas. Confira **Preferências → Resumos →
+Classificar reuniões**. Se o motor devolver algo fora do formato duas vezes, a
+reunião fica sem classificação e o resumo não é afetado — use “Classificar de
+novo” no selo, ou “Refazer o resumo”.
+
+## A busca semântica não encontra nada
+
+1. O Ollama precisa estar aberto (`ollama list` deve responder).
+2. O modelo precisa estar baixado: `ollama pull embeddinggemma-2:270m`, ou o
+   nome que estiver em Preferências → Resumos → Modelo de embedding.
+3. Só reuniões prontas e já refinadas entram no índice, e a indexação espera
+   não haver gravação em andamento. Com o CLI de diagnóstico, `seed-spike index`
+   mostra o que foi indexado e `seed-spike search "consulta"` mostra os scores.
+4. Trocar o modelo de embedding reindexa todas as reuniões.
+
+Resultados fora do assunto podem aparecer: os limiares são preliminares.
+
 ## O atalho de voz não funciona
 
 Confira o atalho e o modo Segurar/Apertar 2× em Preferências → Geral. Teste um
