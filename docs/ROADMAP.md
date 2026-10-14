@@ -14,6 +14,7 @@ decisões, ordem de trabalho e riscos, e agora também o que já foi entregue.
 | 4. Chat ao vivo mais rápido | **Feito** para Claude Code e Ollama (streaming); modelo rápido só no Claude. Codex e Antigravity seguem sem streaming. |
 | 5. Jev | Não iniciado. |
 | 6. Telas compartilhadas | Só plano (ver seção própria). |
+| 7. Reuniões presenciais e híbridas | Só plano (ver seção própria). |
 
 ## Resumo das decisões
 
@@ -250,6 +251,101 @@ multimodais; capturar ou não quando é o próprio usuário quem apresenta.
 **Primeiro passo:** um `seed-spike screens` que captura e deduplica numa
 chamada real, para validar a heurística antes de mexer no app.
 
+## Reuniões presenciais e híbridas (plano, não iniciado)
+
+Hoje o Seed usa o canal como atalho para saber quem fala: tudo que entra pelo
+microfone é "Você" e só a trilha do sistema passa pela separação de vozes e
+pela memória de vozes. Isso vale para uma pessoa de fone numa chamada, e só.
+
+### Cenários a cobrir
+
+| Cenário | Microfone | Áudio do sistema | Hoje |
+| --- | --- | --- | --- |
+| Online, de fone | só o usuário | os outros | Funciona. |
+| Online, no alto-falante | o usuário + vazamento dos outros | os outros | Funciona mal: a fala remota também entra pelo microfone, é transcrita de novo e atribuída a "Você". Nada trata esse eco. |
+| Presencial | várias pessoas na sala | vazio | Não funciona: a sala inteira vira "Você". |
+| Híbrido (sala + remotos, um computador) | várias pessoas + vazamento dos remotos | os remotos | Não funciona: soma os dois problemas. |
+
+### Princípio
+
+A identidade do falante passa a vir da **voz**, não do canal. O canal vira só
+uma pista: o que está na trilha do sistema é com certeza remoto; o que está no
+microfone pode ser o usuário, outra pessoa da sala ou eco de um remoto.
+
+### O que muda
+
+1. **Modo da gravação**, guardado no `meta.json`: `online` (comportamento
+   atual, padrão), `presencial` (só microfone, sem abrir a captura do sistema)
+   e `hibrido` (as duas trilhas, microfone com várias vozes). Escolhido ao
+   iniciar e corrigível depois — trocar o modo reprocessa, sem regravar.
+   Sugestão automática: sem reunião detectada, propor presencial.
+2. **Separação de vozes também no microfone** nos modos presencial e híbrido,
+   com o mesmo diarizador. Transcript, "Quem é quem", renomear e mesclar já
+   trabalham com falantes genéricos.
+3. **A voz do usuário na memória de vozes.** Sem isso ele vira "Falante N" na
+   sala. Dá para cadastrar sem esforço: as trilhas de microfone das reuniões
+   online já gravadas são só ele falando. Guardar como entrada especial
+   ("Você"), nunca sugerida como nome de terceiro.
+4. **Tirar o eco dos remotos do microfone** (híbrido e online no alto-falante).
+   A trilha do sistema é a referência exata do que saiu pelo alto-falante. Em
+   ordem de custo:
+   - por tempo e texto: descartar a fala do microfone que coincide no tempo com
+     uma fala do sistema e tem texto muito parecido;
+   - por voz: um grupo do microfone cuja voz casa com a de um falante do
+     sistema é eco — descartar o grupo inteiro;
+   - por sinal: cancelamento de eco com a trilha do sistema como referência,
+     antes de transcrever. Só se os dois anteriores não bastarem.
+   O primeiro já melhora o cenário "online no alto-falante" e pode entrar
+   sozinho, antes de qualquer modo novo.
+5. **Falantes únicos entre as duas trilhas** no híbrido: numeração e nomes numa
+   lista só, com a origem (sala/remoto) como rótulo, sem o mesmo nome em dois
+   grupos.
+6. **Memória de vozes por condição de captura.** A mesma pessoa pelo Meet e na
+   sala soa diferente para o modelo. Guardar mais de uma amostra por pessoa
+   (remota, sala) e comparar com a mais próxima, em vez de uma média só.
+7. **Ao vivo:** a separação só roda no refino. Durante a gravação o microfone
+   aparece como "Sala" (presencial/híbrido) em vez de "Você". O chat ao vivo
+   segue funcionando sobre o texto.
+8. **Parada automática:** no presencial, só por silêncio no microfone ou
+   manual. No híbrido, as regras atuais (aba fechada, silêncio no sistema).
+9. **Resumo:** o prompt deixa de afirmar que o microfone é o usuário quando o
+   modo não é `online`, e avisa que as atribuições da sala são menos confiáveis.
+10. **Sem internet:** gravação, transcrição e separação já são locais. Com
+    motor remoto, o resumo deve entrar numa fila e ser gerado quando houver
+    rede, em vez de falhar e depender de "Refazer o resumo".
+
+### Riscos
+
+| Risco | Mitigação |
+| --- | --- |
+| Microfone do notebook longe de parte da sala: transcrição e separação pioram | Recomendar microfone de mesa ou iPhone como microfone; mostrar o nível durante a gravação; medir antes de prometer (fase 0). |
+| Falas sobrepostas e reverberação juntam ou dividem pessoas | Manter a revisão em "Quem é quem" e o aviso de confiança no resumo; mesclar/dividir à mão. |
+| Remoção de eco apaga fala real de quem está na sala falando junto com um remoto | Começar pelo critério de texto, que só remove o que é igual; registrar o que foi descartado para poder desfazer no reprocessamento. |
+| Voz da sala não casa com a voz já cadastrada pelo Meet | Várias amostras por pessoa (item 6); confirmar o nome uma vez em cada condição. |
+| Áudio processado pelo macOS (isolamento de voz) suprime os outros da sala | Verificar o modo do microfone no início e avisar; documentar na solução de problemas. |
+| Regressão no cenário que funciona hoje | `online` continua o padrão e não passa pelos passos novos, exceto a remoção de eco por texto, validada à parte. |
+| Gravar pessoas numa sala sem que saibam | Mesmo aviso de consentimento das telas; nada é automático no presencial. |
+
+### Fases, com critério para avançar
+
+0. **Medir antes de construir.** Gravar três amostras reais de 5–10 min
+   (online no alto-falante, presencial, híbrido) e rodar pelo CLI: separação de
+   vozes na trilha do microfone e contagem de falas duplicadas entre as
+   trilhas. Avança se o número de falantes detectado ficar próximo do real e a
+   maior parte das falas for atribuída à pessoa certa numa conferência manual.
+   Repetir com um microfone externo se o do notebook não bastar.
+1. **Eco por texto no modo atual** (item 4, primeiro critério). Ganho imediato
+   para quem usa alto-falante; nenhuma mudança de interface.
+2. **Modo presencial** (itens 1, 2, 7, 8, 9) e a voz do usuário (item 3).
+3. **Modo híbrido** (itens 4 completo, 5 e 6).
+4. **Fila de resumo sem rede** (item 10) — independente, pode entrar antes.
+
+### Decisões em aberto
+
+- O modo é escolhido sempre à mão ou o Seed sugere pelo contexto?
+- No híbrido, a origem (sala/remoto) aparece no transcript ou só em "Quem é quem"?
+- Quantas amostras de voz por pessoa guardar, e se as antigas expiram.
+
 ## Ordem de trabalho
 
 0. Correção do travamento (pré-requisito).
@@ -259,3 +355,4 @@ chamada real, para validar a heurística antes de mexer no app.
 4. Chat ao vivo mais rápido. É independente e pode entrar a qualquer momento.
 5. Jev como opção, se um teste em português justificar.
 6. Telas compartilhadas, começando pelo spike no CLI.
+7. Reuniões presenciais e híbridas, começando pela medição (fase 0) e pelo eco por texto.
